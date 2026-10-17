@@ -1,0 +1,107 @@
+version: 1
+categories:
+  - name: Avisos
+    description: A quién y dónde avisar de los directos.
+  - name: Conexión
+    description: Credenciales de la app de Twitch (https://dev.twitch.tv/console).
+  - name: Webhook
+    description: Avisos instantáneos vía EventSub (requiere URL pública https). Sin esto, se usa polling.
+fields:
+  - key: streamers
+    type: text
+    label: Streamers
+    description: Logins separados por comas o líneas. Añadir uno aquí es todo lo necesario.
+    category: Avisos
+    default: ""
+  - key: channelId
+    type: string
+    label: Canal de avisos
+    description: ID del canal de Discord donde avisar.
+    category: Avisos
+    required: true
+    default: ""
+  - key: liveMessage
+    type: text
+    label: Plantilla del aviso
+    description: "Variables: {streamer} {title} {game} {viewers} {url}."
+    category: Avisos
+    default: "🔴 {streamer} en vivo: {title} ({game}) {url}"
+  - key: mentionRole
+    type: role
+    label: Rol a mencionar
+    description: Vacío = sin mención.
+    category: Avisos
+    default: ""
+  - key: checkMinutes
+    type: number
+    label: Revisar cada (minutos)
+    description: Entre 2 y 60.
+    category: Avisos
+    min: 2
+    max: 60
+    default: 5
+  - key: twitchClientId
+    type: secret
+    label: Twitch Client ID
+    description: De tu app en dev.twitch.tv/console.
+    category: Conexión
+    required: true
+    default: ""
+  - key: twitchClientSecret
+    type: secret
+    label: Twitch Client Secret
+    category: Conexión
+    required: true
+    default: ""
+  - key: useWebhook
+    type: boolean
+    label: Webhook instantáneo (EventSub)
+    description: Requiere URL pública https (puerto 443) en publicBaseUrl. El polling sigue como respaldo.
+    category: Webhook
+    default: false
+  - key: publicBaseUrl
+    type: string
+    label: URL pública del bot
+    description: "Ej. https://bot.midominio.com (sin barra final). El callback será <base>/plugin-routes/twitch/eventsub."
+    category: Webhook
+    default: ""
+  - key: liveState
+    type: variable
+    varType: string
+    label: Estado de directos
+    description: Interno.
+    category: Avisos
+    hidden: true
+    default: ""
+  - key: webhookSecret
+    type: variable
+    varType: string
+    label: Secreto del webhook
+    description: Interno (se autogenera; firma HMAC de Twitch).
+    category: Webhook
+    hidden: true
+    default: ""
+  - key: eventsubState
+    type: variable
+    varType: string
+    label: Estado EventSub
+    description: Interno (suscripciones activas).
+    category: Webhook
+    hidden: true
+    default: ""
+  - key: streamInfo
+    type: variable
+    varType: string
+    label: Ficha de directos
+    description: Interno (título/juego/viewers para la pestaña Directos).
+    category: Avisos
+    hidden: true
+    default: ""
+  - key: notifiedTotal
+    type: variable
+    varType: number
+    label: Avisos enviados
+    description: Contador interno de avisos (sale en la pestaña Directos).
+    category: Avisos
+    hidden: true
+    default: 0

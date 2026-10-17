@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/plugins/*/
+!data/plugins/.gitkeep
+data/.cache/
+.env
+*.log
+drizzle/*.sql
+drizzle/meta/

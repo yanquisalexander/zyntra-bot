@@ -1,0 +1,11 @@
+# Plugin core Twitch — NO editar a mano (se sobrescribe al actualizar).
+# Ajustes en el panel (pestaña Ajustes). Añadir un streamer = sumarlo abajo.
+streamers = ""
+channelId = ""
+liveMessage = "🔴 {streamer} en vivo: {title} ({game}) {url}"
+mentionRole = ""
+checkMinutes = 5
+twitchClientId = ""
+twitchClientSecret = ""
+useWebhook = false
+publicBaseUrl = ""

@@ -1,0 +1,232 @@
+@import "tailwindcss";
+
+/*
+ * Zyntra con acento Alexitoo: negro cálido, Fredoka + Nunito,
+ * chips e icon-boxes de colores, squiggles y un blob que muta.
+ * Las superficies son planas; el carácter lo ponen la tipo,
+ * el color y los detalles dibujados.
+ */
+@theme {
+  --font-sans: "Nunito", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fredoka", "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-background: #0d0d0d;
+  --color-foreground: #f0eeea;
+
+  --color-card: #161616;
+  --color-card-foreground: #f0eeea;
+
+  --color-popover: #1a1a1a;
+  --color-popover-foreground: #f0eeea;
+
+  --color-primary: #5865f2;
+  --color-primary-foreground: #ffffff;
+
+  --color-secondary: #1e1e1e;
+  --color-secondary-foreground: #e8e2d6;
+
+  --color-muted: #1e1e1e;
+  --color-muted-foreground: #948d81;
+
+  --color-accent: #222222;
+  --color-accent-foreground: #f0eeea;
+
+  --color-destructive: #ff5e5b;
+  --color-destructive-foreground: #fff1f0;
+
+  --color-border: #242424;
+  --color-input: #2a2a2a;
+  --color-ring: #a78bfa;
+
+  /* Grises cálidos para convivir con el fondo. */
+  --color-zinc-50: #f5f1e8;
+  --color-zinc-100: #e7e0d2;
+  --color-zinc-200: #cfc6b4;
+  --color-zinc-300: #a89e8b;
+  --color-zinc-400: #857c6d;
+  --color-zinc-500: #6b655a;
+  --color-zinc-600: #544f46;
+  --color-zinc-700: #403b35;
+  --color-zinc-800: #292524;
+  --color-zinc-900: #1c1917;
+  --color-zinc-950: #121010;
+
+  --radius-lg: 1rem;
+  --radius-md: 0.75rem;
+  --radius-sm: 0.5rem;
+
+  --ease-emphasized: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-spring: cubic-bezier(0.34, 1.25, 0.64, 1);
+
+  --animate-page-in: page-in 0.3s ease-out;
+  --animate-page-item: page-in 0.4s ease-out both;
+  --animate-pop-in: pop-in 0.25s var(--ease-spring) both;
+  --animate-fade-in: fade-in 0.18s ease-out both;
+  --animate-fade-in-down: fade-in-down 0.22s var(--ease-emphasized) both;
+  --animate-linear-slide: linear-slide 1.15s ease-in-out infinite;
+  --animate-morph: morph 9s ease-in-out infinite;
+
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.4);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-in-down {
+    from {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes linear-slide {
+    from {
+      transform: translateX(-120%);
+    }
+    to {
+      transform: translateX(320%);
+    }
+  }
+  @keyframes morph {
+    0%,
+    100% {
+      border-radius: 30% 70% 62% 38% / 46% 42% 58% 54%;
+    }
+    33% {
+      border-radius: 62% 38% 44% 56% / 56% 64% 36% 44%;
+    }
+    66% {
+      border-radius: 44% 56% 68% 32% / 62% 36% 64% 38%;
+    }
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+::selection {
+  background: rgba(167, 139, 250, 0.4);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* Números tabulares para stats y contadores. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ripple: lo crea <Ripple/> por pulsación vía Web Animations API. */
+.zyn-ripple {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  transform: scale(0);
+}
+
+/* Skeleton con barrido en vez de pulso plano. */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-muted);
+}
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 80%
+  );
+  animation: zyn-shimmer 1.7s ease-out infinite;
+}
+@keyframes zyn-shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Scrollbars sutiles */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2e2a26;
+  border-radius: 8px;
+  border: 2px solid #0d0d0d;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Monaco: integrarlo al tema */
+.monaco-editor,
+.monaco-editor-background,
+.monaco-editor .margin {
+  --vscode-editor-background: #0d0d0d !important;
+  background-color: #0d0d0d !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .shimmer::after {
+    display: none;
+  }
+}
