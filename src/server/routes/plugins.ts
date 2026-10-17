@@ -6,13 +6,20 @@ import {
   createPlugin,
   DEFAULT_PLUGIN_CODE,
   deletePlugin,
+  deleteRevision,
+  deleteRevisions,
+  detectOrphans,
+  getRevision,
   isCore,
   listPluginNames,
+  listRevisions,
   PLUGIN_TEMPLATES,
   readCode,
   readConfigToml,
   readSchema,
+  restoreRevision,
   snapshotConfigRevision,
+  snapshotRevision,
   writeCode,
   writeConfig,
   writeSchema,
@@ -100,6 +107,9 @@ export function pluginsRoutes(manager: PluginManager): Hono {
     const { code } = await c.req.json<{ code?: string }>();
     if (typeof code !== "string") return c.json({ error: "code requerido" }, 400);
     try {
+      const user = await getSessionUser(c).catch(() => null);
+      // Snapshot antes de sobreescribir (VCS lite).
+      await snapshotRevision(name, user?.discordId ?? null);
       await writeCode(name, code);
       return c.json({ ok: true });
     } catch (e) {
@@ -115,10 +125,12 @@ export function pluginsRoutes(manager: PluginManager): Hono {
     if (typeof toml !== "string") return c.json({ error: "toml requerido" }, 400);
     try {
       parseConfig(toml); // validación con error comprensible
+      const user = await getSessionUser(c).catch(() => null);
+      // Snapshot antes de sobreescribir (VCS lite).
+      await snapshotRevision(name, user?.discordId ?? null);
       await writeConfig(name, toml);
-      // Snapshot de revisión (rollback futuro).
+      // Snapshot legado de config-only (mantiene compatibilidad).
       try {
-        const user = await getSessionUser(c);
         const { getDb } = await import("../../db/client.js");
         const { pluginConfigRevisions, users } = await import("../../db/schema.js");
         const { eq } = await import("drizzle-orm");
@@ -146,6 +158,9 @@ export function pluginsRoutes(manager: PluginManager): Hono {
     const { raw } = await c.req.json<{ raw?: string }>();
     if (typeof raw !== "string") return c.json({ error: "raw requerido" }, 400);
     try {
+      const user = await getSessionUser(c).catch(() => null);
+      // Snapshot antes de sobreescribir (VCS lite).
+      await snapshotRevision(name, user?.discordId ?? null);
       const schema = await writeSchema(name, raw);
       return c.json({ ok: true, schema });
     } catch (e) {
@@ -291,6 +306,8 @@ export function pluginsRoutes(manager: PluginManager): Hono {
     const name = c.req.param("name");
     await manager.unload(name).catch(() => undefined);
     await deletePlugin(name);
+    // Elimina todas las revisiones VCS del plugin (acción intencionada → no huérfanos).
+    await deleteRevisions(name);
     try {
       const { getDb } = await import("../../db/client.js");
       const { plugins } = await import("../../db/schema.js");
@@ -304,6 +321,83 @@ export function pluginsRoutes(manager: PluginManager): Hono {
   });
 
   r.get("/_debug/names", async (c) => c.json({ names: await listPluginNames() }));
+
+  // ─── VCS: revisiones por plugin ──────────────────────────────────────────
+
+  /** Lista revisiones de un plugin (más reciente primero). */
+  r.get("/:name/revisions", async (c) => {
+    const name = c.req.param("name");
+    const revisions = await listRevisions(name);
+    return c.json({ revisions });
+  });
+
+  /** Snapshot manual: guarda el estado actual con etiqueta opcional. */
+  r.post("/:name/revisions", async (c) => {
+    const name = c.req.param("name");
+    const body = await c.req.json<{ label?: string }>().catch(() => ({} as { label?: string }));
+    const user = await getSessionUser(c).catch(() => null);
+    const id = await snapshotRevision(name, user?.discordId ?? null, body.label ?? null);
+    if (!id) return c.json({ error: "no se pudo crear el snapshot (¿plugin existe?)" }, 400);
+    return c.json({ ok: true, id });
+  });
+
+  /** Devuelve el diff completo de una revisión concreta. */
+  r.get("/:name/revisions/:revId", async (c) => {
+    const rev = await getRevision(c.req.param("revId"));
+    if (!rev || rev.pluginId !== c.req.param("name")) return c.json({ error: "revisión no encontrada" }, 404);
+    return c.json({ revision: rev });
+  });
+
+  /**
+   * Restaura el plugin al estado de una revisión.
+   * Si el plugin era huérfano, recrea la carpeta y lo registra + carga.
+   */
+  r.post("/:name/revisions/:revId/restore", async (c) => {
+    const name = c.req.param("name");
+    const revId = c.req.param("revId");
+    const rev = await getRevision(revId);
+    if (!rev || rev.pluginId !== name) return c.json({ error: "revisión no encontrada" }, 404);
+
+    // Si existe, hacemos snapshot del estado actual antes de restaurar.
+    const user = await getSessionUser(c).catch(() => null);
+    if (!rev.orphan) {
+      await snapshotRevision(name, user?.discordId ?? null, `antes de restaurar ${revId.slice(0, 8)}`);
+    }
+
+    const result = await restoreRevision(revId);
+    if (!result.ok) return c.json({ error: result.error }, 500);
+
+    // Recarga en caliente (o carga por primera vez si era huérfano).
+    try {
+      if (rev.orphan) {
+        await manager.enable(name);
+      } else {
+        await manager.reload(name);
+      }
+    } catch {
+      /* La restauración del archivo fue bien aunque el reload falle */
+    }
+
+    return c.json({ ok: true, plugin: manager.getStatus(name) });
+  });
+
+  /** Elimina una revisión individual. */
+  r.delete("/:name/revisions/:revId", async (c) => {
+    const name = c.req.param("name");
+    const revId = c.req.param("revId");
+    const rev = await getRevision(revId);
+    if (!rev || rev.pluginId !== name) return c.json({ error: "revisión no encontrada" }, 404);
+    await deleteRevision(revId);
+    return c.json({ ok: true });
+  });
+
+  // ─── VCS: huérfanos globales ──────────────────────────────────────────────
+
+  /** Lista plugins con revisiones pero sin carpeta en el FS. */
+  r.get("/_orphans", async (c) => {
+    const orphans = await detectOrphans();
+    return c.json({ orphans });
+  });
 
   return r;
 }

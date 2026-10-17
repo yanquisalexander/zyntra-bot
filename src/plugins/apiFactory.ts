@@ -203,7 +203,7 @@ function normalizeComponentId(plugin: string, def: unknown, suffix: string): str
   return `${plugin}:${suffix}:${raw}`;
 }
 
-function registerComponent<T extends { type: number; custom_id: string }>(
+function registerComponent<T extends { custom_id: string }>(
   plugin: string,
   registry: import("./registry.js").PluginRegistry,
   suffix: "button" | "select" | "modal",
@@ -217,20 +217,38 @@ function registerComponent<T extends { type: number; custom_id: string }>(
   registry.components.set(customId, { customId, handler: handler as (ctx: never) => unknown });
   const base = def as Record<string, unknown>;
   const label = typeof base.label === "string" ? base.label.trim().slice(0, 80) : undefined;
+
   if (suffix === "button") {
     const styleMap: Record<string, number> = { primary: 1, secondary: 2, success: 3, danger: 4 };
     const style = styleMap[String(base.style ?? "secondary")] ?? 2;
-    return { type: 1, style, label, custom_id: customId } as unknown as T;
+    // type: 2 = Button component en discord.js v14
+    return { type: 2, style, label, custom_id: customId } as unknown as T;
   }
+
   if (suffix === "select") {
-    const options = Array.isArray(base.options) ? base.options.slice(0, 25) : [];
-    const placeholder = typeof base.placeholder === "string" ? base.placeholder.trim().slice(0, 100) : undefined;
-    return { type: 3, custom_id: customId, placeholder, options } as unknown as T;
+    // type: 3 = StringSelectMenu. Las opciones deben tener label + value (description, emoji opcionales).
+    const rawOptions = Array.isArray(base.options) ? base.options.slice(0, 25) : [];
+    const options = rawOptions.map((o: unknown) => {
+      const opt = o as Record<string, unknown>;
+      return {
+        label: String(opt.label ?? "").slice(0, 100),
+        value: String(opt.value ?? "").slice(0, 100),
+        ...(typeof opt.description === "string" ? { description: opt.description.slice(0, 100) } : {}),
+        ...(opt.emoji != null ? { emoji: opt.emoji } : {}),
+        ...(opt.default === true ? { default: true } : {}),
+      };
+    });
+    const placeholder = typeof base.placeholder === "string" ? base.placeholder.trim().slice(0, 150) : undefined;
+    const minValues = typeof base.minValues === "number" ? base.minValues : undefined;
+    const maxValues = typeof base.maxValues === "number" ? base.maxValues : undefined;
+    return { type: 3, custom_id: customId, placeholder, options, min_values: minValues, max_values: maxValues } as unknown as T;
   }
-  // modal
-  const title = typeof base.label === "string" ? base.label.trim().slice(0, 45) : undefined;
+
+  // modal: se pasa directamente a interaction.showModal({ title, customId, components }).
+  // No es un component que va en ActionRow — se abre desde ctx.showModal(modal).
+  const title = typeof base.label === "string" ? base.label.trim().slice(0, 45) : "Formulario";
   const components = Array.isArray(base.components) ? base.components.slice(0, 5) : [];
-  return { type: 9, custom_id: customId, title, components } as unknown as T;
+  return { title, custom_id: customId, components } as unknown as T;
 }
 
 /** Caché en disco para `api.lib.importUrl` (sobrevive reinicios y offline). */

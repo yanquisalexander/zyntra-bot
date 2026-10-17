@@ -66,6 +66,30 @@ export const pluginConfigRevisions = pgTable("plugin_config_revisions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+/**
+ * Historial de versiones de plugins (VCS lite).
+ * Guarda snapshot completo (código + config) antes de cada escritura.
+ * TTL: 14 días (purge automático al arrancar y cada 24h).
+ * Huérfanos: revisiones de plugins cuya carpeta ya no existe en el FS.
+ */
+export const pluginRevisions = pgTable(
+  "plugin_revisions",
+  {
+    id: id(),
+    /** ID estable: nombre de carpeta en data/plugins/<pluginId>/ */
+    pluginId: text("plugin_id").notNull(),
+    code: text("code").notNull(),
+    configToml: text("config_toml").notNull(),
+    /** Contenido de schema.yml (puede ser cadena vacía si no existe). */
+    schemaYml: text("schema_yml").notNull().default(""),
+    /** Etiqueta opcional ("antes del refactor", etc.) */
+    label: text("label"),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [index("plugin_revisions_plugin_id_idx").on(t.pluginId, t.createdAt)],
+);
+
 export const jobSchedules = pgTable("job_schedules", {
   /** ID estable: `${plugin}:${nombre}` para recurrentes y one-shots. */
   id: text("id").primaryKey(),

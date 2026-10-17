@@ -164,34 +164,58 @@ export class PluginManager {
   private async dispatchInteraction(interaction: never) {
     if (!this.client.user) return;
 
-    // 1) Componentes (botones, selects, modales).
-    if ((interaction as { isButton?: () => boolean }).isButton?.() || (interaction as { isSelectMenu?: () => boolean }).isSelectMenu?.() || (interaction as { isModalSubmit?: () => boolean }).isModalSubmit?.()) {
-      const i = interaction as { customId: string; values?: string[] };
-      const customId = i.customId ?? "";
+    const raw = interaction as Record<string, unknown>;
+
+    // ── 1. Componentes: botones, selects (string/user/role/channel/mentionable), modales ──
+    const isComponent =
+      (raw.isButton as (() => boolean) | undefined)?.() ||
+      // discord.js v14: isSelectMenu() deprecated → usar los tipos específicos
+      (raw.isStringSelectMenu as (() => boolean) | undefined)?.() ||
+      (raw.isUserSelectMenu as (() => boolean) | undefined)?.() ||
+      (raw.isRoleSelectMenu as (() => boolean) | undefined)?.() ||
+      (raw.isChannelSelectMenu as (() => boolean) | undefined)?.() ||
+      (raw.isMentionableSelectMenu as (() => boolean) | undefined)?.() ||
+      (raw.isModalSubmit as (() => boolean) | undefined)?.();
+
+    if (isComponent) {
+      const customId = String(raw.customId ?? "");
+      // Single-server: los componentes también se filtran por guild.
+      const guildId = raw.guildId != null ? String(raw.guildId) : null;
+      if (this.isGuildAllowed && !this.isGuildAllowed(guildId)) return;
+
       for (const [plugin, l] of this.loaded) {
         const comp = l.registry.components.get(customId);
         if (!comp) continue;
-        const inter = interaction as {
-          reply: (c: string | { content?: string; ephemeral?: boolean }) => Promise<unknown>;
-          deferReply: () => Promise<unknown>;
-          editReply: (c: string | { content?: string }) => Promise<unknown>;
-          showModal: (m: { customId: string; title: string; components: unknown[] }) => Promise<unknown>;
-          user: { id: string; username: string; tag: string };
-          channel?: unknown;
-          guild?: unknown;
-        };
         try {
           await comp.handler({
             interaction,
             customId,
-            values: i.values ?? [],
-            user: inter.user,
-            channel: inter.channel ?? null,
-            guild: inter.guild ?? null,
-            reply: (c: string | { content?: string }) => inter.reply(typeof c === "string" ? { content: c } : c),
-            deferReply: () => inter.deferReply(),
-            editReply: (c: string | { content?: string }) => inter.editReply(typeof c === "string" ? { content: c } : c),
-            showModal: (m: { customId: string; title: string; components: unknown[] }) => inter.showModal(m),
+            // values: string[] para selects, vacío para botones/modales.
+            values: Array.isArray(raw.values) ? (raw.values as string[]) : [],
+            user: raw.user,
+            channel: raw.channel ?? null,
+            guild: raw.guild ?? null,
+            reply: (c: unknown) =>
+              (raw.reply as (c: unknown) => Promise<unknown>)(
+                typeof c === "string" ? { content: c } : c,
+              ),
+            deferReply: (opts?: unknown) =>
+              (raw.deferReply as (o?: unknown) => Promise<unknown>)(opts),
+            editReply: (c: unknown) =>
+              (raw.editReply as (c: unknown) => Promise<unknown>)(
+                typeof c === "string" ? { content: c } : c,
+              ),
+            // showModal: solo válido desde botón/select (discord.js lo valida).
+            // discord.js espera { customId, title, components } (camelCase).
+            // api.discord.modal() devuelve { custom_id, title, components } → traducir.
+            showModal: (m: unknown) => {
+              const obj = m as Record<string, unknown>;
+              return (raw.showModal as (m: unknown) => Promise<unknown>)({
+                customId: obj.customId ?? obj.custom_id,
+                title: obj.title,
+                components: obj.components,
+              });
+            },
           } as never);
         } catch (e) {
           logger.error(`plugin:${plugin}`, `component ${customId}: ${String(e)}`);
@@ -201,43 +225,63 @@ export class PluginManager {
       return;
     }
 
-    // 2) Slash commands (ChatInput).
-    const i = interaction as {
-      isChatInputCommand?: () => boolean;
-      commandName: string;
-      options?: {
-        getSubcommand?: () => string | null;
-        get?: (name: string) => { value?: unknown } | undefined;
-        getInteger?: (name: string) => number | null;
-        getUser?: (name: string) => { id: string; username: string } | undefined;
-      };
-    };
-    if (!i.isChatInputCommand?.()) return;
-    const cmdName = i.commandName.toLowerCase();
+    // ── 2. Slash commands (ChatInput) ─────────────────────────────────────
+    if (!(raw.isChatInputCommand as (() => boolean) | undefined)?.()) return;
+
+    const guildId = raw.guildId != null ? String(raw.guildId) : null;
+    if (this.isGuildAllowed && !this.isGuildAllowed(guildId)) return;
+
+    const cmdName = String(raw.commandName ?? "").toLowerCase();
+    const opts = raw.options as Record<string, unknown> | undefined;
+
     for (const [plugin, l] of this.loaded) {
       const entry = l.registry.commands.get(cmdName);
-      if (!entry) continue;
-      const o = i.options ?? {};
+      if (!entry?.slash) continue;
+
+      // Reconstruye args[] en el mismo orden que las options declaradas.
       const args: string[] = [];
-      for (const opt of (entry.slash?.options ?? []) as Record<string, unknown>[]) {
+      for (const opt of (entry.slash.options ?? []) as Record<string, unknown>[]) {
+        const optName = String(opt.name ?? "");
         const t = String(opt.type ?? "string");
+        let val: unknown;
         if (t === "user") {
-          const u = o.getUser?.(String(opt.name));
-          if (u) args.push(u.id);
-        } else if (t === "number" || t === "boolean") {
-          const v = o.getInteger?.(String(opt.name));
-          if (v !== null && v !== undefined) args.push(String(v));
+          val = (opts?.getUser as ((n: string) => { id: string } | null | undefined) | undefined)?.(optName)?.id;
+        } else if (t === "number") {
+          val = (opts?.getNumber as ((n: string) => number | null) | undefined)?.(optName) ??
+                (opts?.getInteger as ((n: string) => number | null) | undefined)?.(optName);
+        } else if (t === "boolean") {
+          val = (opts?.getBoolean as ((n: string) => boolean | null) | undefined)?.(optName);
+        } else if (t === "channel") {
+          val = (opts?.getChannel as ((n: string) => { id: string } | null | undefined) | undefined)?.(optName)?.id;
+        } else if (t === "role") {
+          val = (opts?.getRole as ((n: string) => { id: string } | null | undefined) | undefined)?.(optName)?.id;
         } else {
-          const v = o.get?.(String(opt.name))?.value;
-          if (v !== undefined) args.push(String(v));
+          val = (opts?.getString as ((n: string) => string | null) | undefined)?.(optName);
         }
+        if (val !== null && val !== undefined) args.push(String(val));
       }
+
       try {
+        // Para slash, message es null. El handler puede detectarlo y usar
+        // ctx.replyInteraction() para responder via la interaction.
         await entry.handler(
           {
             message: null as never,
             content: `/${cmdName}${args.length ? " " + args.join(" ") : ""}`,
             args,
+            // Helper extra: responde vía la interaction de slash (ephemeral opt-in).
+            replyInteraction: (c: unknown, ephemeral = false) =>
+              (raw.reply as (c: unknown) => Promise<unknown>)(
+                typeof c === "string" ? { content: c, ephemeral } : { ephemeral, ...(c as object) },
+              ),
+            deferInteraction: (ephemeral = false) =>
+              (raw.deferReply as (o: unknown) => Promise<unknown>)({ ephemeral }),
+            editInteraction: (c: unknown) =>
+              (raw.editReply as (c: unknown) => Promise<unknown>)(
+                typeof c === "string" ? { content: c } : c,
+              ),
+            isSlash: true,
+            interaction: raw,
           } as never,
           ...args,
         );

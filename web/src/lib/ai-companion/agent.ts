@@ -43,10 +43,27 @@ function capResult(message: string): string {
   return message.slice(0, MAX_TOOL_RESULT) + "\n…(resultado recortado)";
 }
 
+/**
+ * Detecta si `text` parece ser un volcado del código baseline en vez de una
+ * respuesta estructurada. Busca un chunk contiguo del baseline dentro del
+ * texto visible (sin tool-blocks ni thinking tags).
+ */
+function looksLikeCodeDump(text: string, baseline: string): boolean {
+  if (!baseline.trim() || baseline.trim().length < 100) return false;
+  const visible = text.replace(/```tool[\s\S]*?```/gi, '')
+                      .replace(/<think>[\s\S]*?<\/think>/gi, '')
+                      .trim();
+  if (visible.length < 200) return false;
+  // Busca si el visible contiene un chunk grande del baseline (señal de volcado)
+  const chunk = baseline.slice(50, 350).trim();
+  return chunk.length > 80 && visible.includes(chunk);
+}
+
 async function streamTurn(
   eng: EngineLike,
   messages: { role: string; content: string }[],
   cb: AgentCallbacks,
+  codeBaseline?: string,
 ): Promise<string> {
   const stream = (await eng.chat.completions.create({
     messages,
@@ -65,6 +82,22 @@ async function streamTurn(
       chunk.choices?.[0]?.delta?.content ?? chunk.choices?.[0]?.message?.content ?? "";
     if (delta) {
       full += delta;
+      // Detectar volcado de código: si el acumulado parece ser una copia del
+      // baseline en texto plano, suprimir onToken y emitir un step de thinking
+      // para que el chat no pinte el código suelto.
+      if (looksLikeCodeDump(full, codeBaseline ?? "")) {
+        cb.onStep({ kind: "thinking", text: "Generando plan..." });
+        cb.onToken("");
+      } else {
+        // Solo emitir tokens si el texto visible tiene contenido real
+        const visible = full
+          .replace(/```tool[\s\S]*?```/gi, "")
+          .replace(/<think>[\s\S]*?<\/think>/gi, "")
+          .trim();
+        if (visible.length > 0) {
+          cb.onToken(full);
+        }
+      }
     }
   }
   return full;
@@ -141,7 +174,7 @@ export async function runAgentTurn(
     }
     cb.onStep({ kind: "thinking", text: iter === 0 ? "Pensando…" : "Revisando el resultado…" });
     cb.onToken("");
-    const full = await streamTurn(eng, messages, cb);
+    const full = await streamTurn(eng, messages, cb, store.draft["plugin.js"]);
     if (cb.isCancelled()) {
       return { text: "", artifact: { kind: "explanation" }, steps, cancelled: true };
     }

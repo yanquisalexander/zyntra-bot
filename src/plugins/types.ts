@@ -48,6 +48,23 @@ export interface CommandCtx {
   message: import("discord.js").Message;
   content: string;
   args: string[];
+  /**
+   * true cuando el comando llega como slash interaction (message es null).
+   * Usa replyInteraction() para responder en ese caso.
+   */
+  isSlash?: boolean;
+  /** La interaction de Discord cuando es slash (null para !prefijo). */
+  interaction?: Record<string, unknown> | null;
+  /**
+   * Responde a un slash command. Equivale a interaction.reply().
+   * ephemeral=true → solo lo ve quien ejecutó el comando.
+   * No usar si ya respondiste con deferInteraction().
+   */
+  replyInteraction?: (content: string | Record<string, unknown>, ephemeral?: boolean) => Promise<unknown>;
+  /** Aplaza la respuesta ("pensando…"). Luego usa editInteraction(). */
+  deferInteraction?: (ephemeral?: boolean) => Promise<unknown>;
+  /** Edita la respuesta aplazada con deferInteraction(). */
+  editInteraction?: (content: string | Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface SlashCommandOption {
@@ -260,9 +277,10 @@ export interface PluginUi {
 }
 
 export interface PluginDiscordUi {
-  button(def: DiscordComponentDef, handler: (ctx: InteractionCtx) => unknown): { type: 1; style: number; label?: string; custom_id: string };
+  button(def: DiscordComponentDef, handler: (ctx: InteractionCtx) => unknown): { type: 2; style: number; label?: string; custom_id: string };
   selectMenu(def: DiscordComponentDef, handler: (ctx: InteractionCtx) => unknown): { type: 3; custom_id: string; placeholder?: string; options: unknown[] };
-  modal(def: DiscordComponentDef, handler: (ctx: InteractionCtx) => unknown): { type: 9; custom_id: string; title?: string; components: unknown[] };
+  /** El objeto devuelto se pasa directamente a ctx.showModal() — no es un componente de ActionRow. */
+  modal(def: DiscordComponentDef, handler: (ctx: InteractionCtx) => unknown): { title: string; custom_id: string; components: unknown[] };
   unregister(id: string): void;
 }
 

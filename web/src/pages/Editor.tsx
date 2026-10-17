@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import EditorMonaco, { type BeforeMount } from "@monaco-editor/react";
-import { ArrowLeft, Braces, CheckCircle2, FileCode2, Save, Settings2, SlidersHorizontal, Sparkles, TriangleAlert, Variable, Zap } from "lucide-react";
-import { api } from "@/lib/api";
+import { ArrowLeft, Braces, CheckCircle2, FileCode2, History, RotateCcw, Save, Settings2, SlidersHorizontal, Sparkles, Tag, Trash2, TriangleAlert, Variable, Zap } from "lucide-react";
+import { api, createRevision, deleteRevision, getRevision, listRevisions, restoreRevision, type PluginRevision, type PluginRevisionFull } from "@/lib/api";
 import { DEFAULT_AI_MODEL } from "@/lib/ai-companion/models";
 import { AiCompanionPanel } from "@/components/plugin/AiCompanionPanel";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { Segmented, type SegmentedOption } from "@/components/ui/segmented";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Input } from "@/components/ui/input";
 import { PageHeader, AlertError, StatusBadge, statusText } from "@/components/common";
 import {
   SettingsForm,
@@ -21,7 +22,7 @@ import {
 } from "@/components/plugin/SettingsForm";
 import { VariablesPanel } from "@/components/plugin/VariablesPanel";
 
-type Tab = "code" | "settings" | "variables" | "schema" | "config";
+type Tab = "code" | "settings" | "variables" | "schema" | "config" | "history";
 
 // La lib extra es global a Monaco: se re-registra de forma idempotente
 // (dispose previo) para sobrevivir a StrictMode/HMR sin duplicados.
@@ -87,6 +88,16 @@ export default function PluginEditor() {
   const [showAi, setShowAi] = useState(false);
   const formRef = useRef<SettingsFormHandle>(null);
 
+  // ─── VCS: estado del historial ──────────────────────────────────────────
+  const [revisions, setRevisions] = useState<PluginRevision[]>([]);
+  const [revisionsLoading, setRevisionsLoading] = useState(false);
+  const [selectedRev, setSelectedRev] = useState<PluginRevisionFull | null>(null);
+  const [selectedRevLoading, setSelectedRevLoading] = useState(false);
+  const [snapshotLabel, setSnapshotLabel] = useState("");
+  const [snapshotSaving, setSnapshotSaving] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [deletingRev, setDeletingRev] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!name) return;
     setLoading(true);
@@ -129,6 +140,22 @@ export default function PluginEditor() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadRevisions = useCallback(async () => {
+    if (!name) return;
+    setRevisionsLoading(true);
+    try {
+      setRevisions(await listRevisions(name));
+    } catch {
+      /* noop */
+    } finally {
+      setRevisionsLoading(false);
+    }
+  }, [name]);
+
+  useEffect(() => {
+    if (tab === "history") loadRevisions();
+  }, [tab, loadRevisions]);
 
   useEffect(() => {
     api<{ config: Record<string, unknown> }>("/api/config")
@@ -283,8 +310,9 @@ export default function PluginEditor() {
       { value: "variables", label: "Variables", icon: <Variable className="size-4" /> },
       { value: "schema", label: "schema.yml", icon: <Braces className="size-4" />, dot: dirtySchema },
       { value: "config", label: "config.toml", icon: <Settings2 className="size-4" />, dot: dirtyToml },
+      { value: "history", label: "Historial", icon: <History className="size-4" /> },
     ] as SegmentedOption<Tab>[]
-  ).filter((t) => !core || t.value === "settings" || t.value === "variables");
+  ).filter((t) => !core || t.value === "settings" || t.value === "variables" || t.value === "history");
 
   // Core: sin pestañas de código — si se cae en una, volver a Ajustes.
   useEffect(() => {
@@ -409,7 +437,7 @@ export default function PluginEditor() {
 
       {msgKind === "err" && msg && <AlertError message={msg} />}
 
-      {/* Contenido: formulario, variables o Monaco */}
+      {/* Contenido: formulario, variables, historial o Monaco */}
       {tab === "variables" ? (
         <Card>
           <CardContent className="p-6">
@@ -489,6 +517,200 @@ export default function PluginEditor() {
             )}
           </CardContent>
         </Card>
+      ) : tab === "history" ? (
+        <div className="space-y-4">
+          {/* Guardar punto manual */}
+          <Card>
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
+              <div className="flex-1 space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Etiqueta opcional
+                </label>
+                <Input
+                  placeholder="ej: antes del refactor, versión estable…"
+                  value={snapshotLabel}
+                  onChange={(e) => setSnapshotLabel(e.target.value)}
+                  disabled={snapshotSaving}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <Button
+                size="sm"
+                disabled={snapshotSaving || loading}
+                onClick={async () => {
+                  if (!name) return;
+                  setSnapshotSaving(true);
+                  try {
+                    await createRevision(name, snapshotLabel || undefined);
+                    setSnapshotLabel("");
+                    say("Punto de restauración guardado ✓", "ok");
+                    await loadRevisions();
+                  } catch (e) {
+                    say(String(e instanceof Error ? e.message : e), "err");
+                  } finally {
+                    setSnapshotSaving(false);
+                  }
+                }}
+              >
+                <Tag className="size-4" />
+                {snapshotSaving ? "Guardando…" : "Guardar punto ahora"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Lista de revisiones */}
+          <Card>
+            <CardContent className="divide-y divide-border p-0">
+              {revisionsLoading ? (
+                <div className="space-y-2 p-4">
+                  {[...Array(3)].map((_, i) => (
+                    <Skeleton key={i} className="h-14 w-full" />
+                  ))}
+                </div>
+              ) : revisions.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 p-8 text-center text-muted-foreground">
+                  <History className="size-8 opacity-30" />
+                  <p className="text-sm">Aún no hay revisiones.</p>
+                  <p className="text-xs opacity-70">
+                    Se guardan automáticamente al editar el código o la config.
+                  </p>
+                </div>
+              ) : (
+                revisions.map((rev) => (
+                  <div
+                    key={rev.id}
+                    className={cn(
+                      "flex flex-col gap-2 p-4 transition-colors sm:flex-row sm:items-start",
+                      selectedRev?.id === rev.id && "bg-muted/40",
+                    )}
+                  >
+                    <div className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1" onClick={async () => {
+                      if (selectedRev?.id === rev.id) { setSelectedRev(null); return; }
+                      setSelectedRevLoading(true);
+                      try {
+                        setSelectedRev(await getRevision(name ?? "", rev.id));
+                      } catch {
+                        /* noop */
+                      } finally {
+                        setSelectedRevLoading(false);
+                      }
+                    }}>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs text-muted-foreground">{rev.id.slice(0, 8)}</span>
+                        {rev.label && (
+                          <Badge variant="secondary" className="gap-1 text-xs">
+                            <Tag className="size-3" />
+                            {rev.label}
+                          </Badge>
+                        )}
+                        {rev.orphan && (
+                          <Badge variant="warning" className="text-xs">
+                            <TriangleAlert className="size-3" />
+                            plugin eliminado
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span>{new Date(rev.createdAt).toLocaleString()}</span>
+                        {rev.createdBy && <span>· por {rev.createdBy}</span>}
+                        {rev.codePreview && (
+                          <span className="hidden truncate font-mono opacity-50 sm:block sm:max-w-[260px]">
+                            · {rev.codePreview.replace(/\s+/g, " ").trim()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant={rev.orphan ? "default" : "secondary"}
+                        disabled={restoring === rev.id}
+                        title={rev.orphan ? "Restaurar y recargar plugin eliminado" : "Restaurar a este estado"}
+                        onClick={async () => {
+                          if (!name) return;
+                          const label = rev.label ? `"${rev.label}"` : rev.id.slice(0, 8);
+                          if (!window.confirm(`¿Restaurar el plugin al estado ${label}? El estado actual se guardará como nueva revisión.`)) return;
+                          setRestoring(rev.id);
+                          try {
+                            await restoreRevision(name, rev.id);
+                            say(`Restaurado a ${label} ✓ — recargado en caliente`, "ok");
+                            await Promise.all([load(), loadRevisions()]);
+                          } catch (e) {
+                            say(String(e instanceof Error ? e.message : e), "err");
+                          } finally {
+                            setRestoring(null);
+                          }
+                        }}
+                      >
+                        <RotateCcw className="size-4" />
+                        {restoring === rev.id ? "Restaurando…" : rev.orphan ? "Restaurar plugin" : "Restaurar"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-destructive"
+                        disabled={deletingRev === rev.id}
+                        title="Eliminar esta revisión"
+                        onClick={async () => {
+                          if (!name) return;
+                          if (!window.confirm("¿Eliminar esta revisión? No se puede deshacer.")) return;
+                          setDeletingRev(rev.id);
+                          try {
+                            await deleteRevision(name, rev.id);
+                            if (selectedRev?.id === rev.id) setSelectedRev(null);
+                            await loadRevisions();
+                          } catch (e) {
+                            say(String(e instanceof Error ? e.message : e), "err");
+                          } finally {
+                            setDeletingRev(null);
+                          }
+                        }}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+
+                    {/* Detalle expandido: código, config y schema de la revisión */}
+                    {selectedRev?.id === rev.id && (
+                      <div className="col-span-full mt-2 w-full space-y-2">
+                        {selectedRevLoading ? (
+                          <Skeleton className="h-32 w-full" />
+                        ) : (
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground">plugin.js</p>
+                              <pre className="max-h-48 overflow-auto rounded-lg bg-[#1e1e1e] p-3 font-mono text-[11px] text-[#d4d4d4]">
+                                {selectedRev.code}
+                              </pre>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground">config.toml</p>
+                              <pre className="max-h-48 overflow-auto rounded-lg bg-[#1e1e1e] p-3 font-mono text-[11px] text-[#d4d4d4]">
+                                {selectedRev.configToml || "(vacío)"}
+                              </pre>
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-xs font-medium text-muted-foreground">schema.yml</p>
+                              <pre className="max-h-48 overflow-auto rounded-lg bg-[#1e1e1e] p-3 font-mono text-[11px] text-[#d4d4d4]">
+                                {selectedRev.schemaYml || "(vacío)"}
+                              </pre>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Las revisiones se guardan automáticamente al editar código o config, y se eliminan tras 14 días.
+            Los plugins eliminados desde el FS (no desde la UI) aparecen marcados como "plugin eliminado"
+            y pueden restaurarse.
+          </p>
+        </div>
       ) : (
         <div className={showAiPanel ? "grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]" : "min-w-0 space-y-4"}>
           <Card className="min-w-0 overflow-hidden">
@@ -592,7 +814,7 @@ export default function PluginEditor() {
           Al guardar aquí el plugin se recarga solo con la nueva config ✨ — sin botón. Las tareas
           programadas conservan su horario pendiente. Si algo falla, verás el aviso aquí arriba y en los logs.
         </p>
-      ) : (
+      ) : tab === "history" ? null : (
         <p className="text-[11px] leading-relaxed text-muted-foreground">
           Al guardar y recargar, revisamos el código y aplicamos los cambios sin apagar el bot. Si algo
           falla, verás el aviso aquí arriba y en los logs.

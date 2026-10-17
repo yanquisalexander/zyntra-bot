@@ -103,6 +103,20 @@ if (env.BYPASS_ADMIN_SERVER_CHECK) {
 const seeded = await seedCorePlugins().catch(() => [] as string[]);
 for (const s of seeded) logger.info("server", `core plugin: ${s}`);
 
+// Purge de revisiones VCS con más de 14 días.
+{
+  const { purgeOldRevisions } = await import("../plugins/store.js");
+  purgeOldRevisions()
+    .then((n) => { if (n > 0) logger.info("server", `vcs: purgadas ${n} revisiones antiguas`); })
+    .catch(() => undefined);
+  // Repetir cada 24h mientras el proceso vive.
+  setInterval(() => {
+    purgeOldRevisions()
+      .then((n) => { if (n > 0) logger.info("server", `vcs: purgadas ${n} revisiones antiguas`); })
+      .catch(() => undefined);
+  }, 24 * 60 * 60 * 1000).unref();
+}
+
 // Hidrata el scheduler (pausas + one-shots pendientes) ANTES del autoload,
 // para que los setup adopten su estado guardado. Luego autoload + watcher.
 // Cada arranque lee config.toml fresco; el watcher recarga solo al guardar.

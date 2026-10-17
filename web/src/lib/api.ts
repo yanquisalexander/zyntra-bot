@@ -69,3 +69,71 @@ export interface BootstrapData {
 export function bootstrap(): BootstrapData {
   return (window as unknown as { __BOOTSTRAP__?: BootstrapData }).__BOOTSTRAP__ ?? {};
 }
+
+// ─── VCS: tipos y helpers de revisiones ──────────────────────────────────────
+
+export interface PluginRevision {
+  id: string;
+  pluginId: string;
+  codePreview: string;
+  label: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  /** true si la carpeta del plugin ya no existe en el FS */
+  orphan: boolean;
+}
+
+export interface PluginRevisionFull extends PluginRevision {
+  code: string;
+  configToml: string;
+  schemaYml: string;
+}
+
+export interface OrphanGroup {
+  pluginId: string;
+  count: number;
+  latestAt: string;
+}
+
+/** Lista las revisiones de un plugin (más reciente primero). */
+export async function listRevisions(pluginId: string): Promise<PluginRevision[]> {
+  const d = await api<{ revisions: PluginRevision[] }>(`/api/plugins/${encodeURIComponent(pluginId)}/revisions`);
+  return d.revisions;
+}
+
+/** Crea un snapshot manual con etiqueta opcional. */
+export async function createRevision(pluginId: string, label?: string): Promise<string> {
+  const d = await api<{ id: string }>(`/api/plugins/${encodeURIComponent(pluginId)}/revisions`, {
+    method: "POST",
+    body: JSON.stringify({ label: label ?? null }),
+  });
+  return d.id;
+}
+
+/** Obtiene el detalle completo (código + config) de una revisión. */
+export async function getRevision(pluginId: string, revId: string): Promise<PluginRevisionFull> {
+  const d = await api<{ revision: PluginRevisionFull }>(
+    `/api/plugins/${encodeURIComponent(pluginId)}/revisions/${encodeURIComponent(revId)}`,
+  );
+  return d.revision;
+}
+
+/** Restaura el plugin al estado de una revisión. */
+export async function restoreRevision(pluginId: string, revId: string): Promise<void> {
+  await api(`/api/plugins/${encodeURIComponent(pluginId)}/revisions/${encodeURIComponent(revId)}/restore`, {
+    method: "POST",
+  });
+}
+
+/** Elimina una revisión individual. */
+export async function deleteRevision(pluginId: string, revId: string): Promise<void> {
+  await api(`/api/plugins/${encodeURIComponent(pluginId)}/revisions/${encodeURIComponent(revId)}`, {
+    method: "DELETE",
+  });
+}
+
+/** Lista todos los plugins huérfanos (con revisiones pero sin carpeta). */
+export async function listOrphans(): Promise<OrphanGroup[]> {
+  const d = await api<{ orphans: OrphanGroup[] }>("/api/plugins/_orphans");
+  return d.orphans;
+}

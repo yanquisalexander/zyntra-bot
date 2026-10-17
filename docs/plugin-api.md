@@ -51,34 +51,227 @@ definePlugin({
 
 ## Slash commands y componentes de Discord
 
+### Slash commands
+
 ```js
-// Slash command: se registra como /nombre en el guild (instantáneo).
 api.commands.register(
   "ping",
-  async (ctx) => { await api.reply(ctx.message, "Pong!"); },
-  { description: "Responde pong", slash: { description: "Responde pong con latencia", options: [{ name: "eco", type: "string", required: false }] } },
+  async (ctx) => {
+    if (ctx.isSlash) {
+      // Slash: hay que responder via la interaction (obligatorio).
+      await ctx.replyInteraction("Pong! 🏓");
+    } else {
+      // Mensaje prefijado: responde al canal normal.
+      await api.reply(ctx.message, "Pong! 🏓");
+    }
+  },
+  {
+    description: "Responde pong",
+    slash: {
+      description: "Responde pong con latencia",
+      options: [
+        { name: "eco", type: "string", required: false, description: "Texto a repetir" },
+      ],
+    },
+  },
+);
+```
+
+**Diferencia `!comando` vs `/slash`:**
+
+| | `!comando` (prefijo) | `/slash` |
+|---|---|---|
+| `ctx.message` | Objeto `Message` | `null` |
+| `ctx.isSlash` | `false` / `undefined` | `true` |
+| Para responder | `api.reply(ctx.message, …)` o `ctx.message.channel.send(…)` | `ctx.replyInteraction(…)` |
+| Para aplazar | — | `ctx.deferInteraction()` + `ctx.editInteraction(…)` |
+
+**Helper recomendado** para comandos que funcionan en ambos modos:
+
+```js
+async function sendOrReply(ctx, payload) {
+  if (ctx.isSlash) {
+    await ctx.replyInteraction(
+      typeof payload === "string" ? payload : payload,
+      false, // ephemeral = false → visible para todos
+    );
+  } else {
+    await ctx.message.channel.send(
+      typeof payload === "string" ? { content: payload } : payload,
+    );
+  }
+}
+```
+
+**`ctx` en slash** lleva helpers extra:
+- `ctx.replyInteraction(content | opts, ephemeral?)` — responde la interaction. `ephemeral: true` = solo lo ve quien ejecutó el comando.
+- `ctx.deferInteraction(ephemeral?)` — muestra "pensando…". Necesario si el handler tarda más de 3s.
+- `ctx.editInteraction(content | opts)` — edita la respuesta aplazada.
+- `ctx.interaction` — la `ChatInputCommandInteraction` de discord.js, para accesos avanzados.
+
+**Notas:**
+- Guild-scoped (instantáneo). Sin `guildId` configurado o sin cliente listo, se omite; el `!nombre` sigue funcionando.
+- Opciones: `string|number|boolean|user|channel|role`, `required`, `choices`, `min_value`, `max_value` (máx 25).
+
+---
+
+### Botones
+
+```js
+// api.discord.button devuelve el descriptor JSON para meter en un ActionRow.
+const btnConfirmar = api.discord.button(
+  { id: "confirmar", label: "✅ Confirmar", style: "success" },
+  async (ctx) => {
+    // ctx: InteractionCtx (ver tabla abajo)
+    await ctx.reply({ content: `${ctx.user.username} confirmó.`, ephemeral: false });
+  },
 );
 
-// Botón: devuelve el descriptor para meterlo en un mensaje/embed.
-const btn = api.ui.discord.button({ id: "ver", label: "Ver directo", style: "primary" }, async (ctx) => {
-  await ctx.reply("🔴 https://twitch.tv/alguien");
-});
-await api.sendMessage(channel, { content: "¿Quieres verlo?", components: [{ type: 1, components: [btn] }] });
+const btnCancelar = api.discord.button(
+  { id: "cancelar", label: "❌ Cancelar", style: "danger" },
+  async (ctx) => {
+    await ctx.reply({ content: "Cancelado.", ephemeral: true }); // solo lo ve él
+  },
+);
 
-// Select menu
-const sel = api.ui.discord.selectMenu({ id: "juego", placeholder: "Elige juego", options: [{ label: "Elden Ring", value: "er" }] }, async (ctx) => {
-  await ctx.reply(`Elegiste: ${ctx.values[0]}`);
-});
-
-// Modal
-const modal = api.ui.discord.modal({ id: "reporte", label: "Reportar", components: [{ type: 1, components: [{ type: 4, custom_id: "texto", label: "Detalles" }] }] }, async (ctx) => {
-  await ctx.reply("Gracias por el reporte");
+// En el comando: envía el mensaje con el ActionRow.
+await sendOrReply(ctx, {
+  content: "¿Confirmas?",
+  components: [
+    { type: 1, components: [btnConfirmar, btnCancelar] }, // ActionRow (type: 1)
+  ],
 });
 ```
 
-- **Slash**: guild-scoped (instantáneo). Sin `guildId` configurado o sin cliente listo, se omite (el `!nombre` sigue funcionando). Opciones: `string|number|boolean|user|channel|role`, `required`, `choices`, `min_value`, `max_value` (máx 25).
-- **Componentes**: `customId` namespaced `plugin:tipo:id`. El handler recibe `{ interaction, customId, values, user, channel, guild, reply, deferReply, editReply, showModal }`. Errores aislados por handler.
-- Se retiran solos al recargar/apagar. Sin oyentes/handlers huérfanos.
+Estilos: `"primary"` (azul) · `"secondary"` (gris) · `"success"` (verde) · `"danger"` (rojo).
+
+---
+
+### Select menus
+
+```js
+const selectRol = api.discord.selectMenu(
+  {
+    id: "elegir-rol",
+    placeholder: "Elige tu rol...",
+    options: [
+      { label: "🎮 Gaming",  value: "gaming",  description: "Texto opcional bajo la opción" },
+      { label: "💻 Dev",     value: "dev" },
+    ],
+    // minValues: 1,  // opcional, defecto 1
+    // maxValues: 1,  // opcional, defecto 1
+  },
+  async (ctx) => {
+    const elegido = ctx.values[0]; // array con los valores elegidos
+    await ctx.reply({ content: `Elegiste: ${elegido}`, ephemeral: true });
+  },
+);
+
+// Un select ocupa toda la fila — no puede compartir ActionRow con botones.
+await sendOrReply(ctx, {
+  content: "Selecciona:",
+  components: [{ type: 1, components: [selectRol] }],
+});
+```
+
+---
+
+### Modales (formularios emergentes)
+
+> **⚠️ Los modales SOLO se pueden abrir desde un botón o select.**
+> Discord no permite `showModal()` directamente desde un slash command ni desde `!comando`.
+> Flujo obligatorio: comando → botón/select → clic → modal.
+
+```js
+// 1. Registra el modal (handler del submit).
+const modalReporte = api.discord.modal(
+  {
+    id: "reporte",
+    label: "Enviar reporte",   // título del popup en Discord (máx 45 chars)
+    components: [
+      {
+        type: 1, // ActionRow dentro del modal
+        components: [
+          {
+            type: 4,               // TextInput
+            custom_id: "titulo",
+            label: "Título",
+            style: 1,              // 1 = SHORT (una línea)
+            required: true,
+            min_length: 3,
+            max_length: 80,
+          },
+        ],
+      },
+      {
+        type: 1,
+        components: [
+          {
+            type: 4,
+            custom_id: "detalle",
+            label: "Descripción",
+            style: 2,              // 2 = PARAGRAPH (varias líneas)
+            required: false,
+            max_length: 500,
+          },
+        ],
+      },
+    ],
+  },
+  async (ctx) => {
+    // Leer los campos desde ctx.interaction (ModalSubmitInteraction de discord.js).
+    const titulo  = ctx.interaction?.fields?.getTextInputValue?.("titulo")  ?? "";
+    const detalle = ctx.interaction?.fields?.getTextInputValue?.("detalle") ?? "";
+    await ctx.reply({ content: `✅ Recibido: **${titulo}**`, ephemeral: true });
+  },
+);
+
+// 2. Botón que abre el modal.
+const btnAbrir = api.discord.button(
+  { id: "abrir-reporte", label: "📝 Reportar", style: "primary" },
+  async (ctx) => {
+    // ctx.showModal recibe el objeto devuelto por api.discord.modal().
+    await ctx.showModal(modalReporte);
+  },
+);
+
+// 3. Comando que envía el botón.
+api.commands.register("reporte", async (ctx) => {
+  await sendOrReply(ctx, {
+    content: "¿Algo que reportar?",
+    components: [{ type: 1, components: [btnAbrir] }],
+  });
+}, { slash: { description: "Abre el formulario de reporte" } });
+```
+
+**Leer campos del modal:**
+```js
+const valor = ctx.interaction?.fields?.getTextInputValue?.("mi_custom_id") ?? "";
+```
+
+---
+
+### `InteractionCtx` (handler de componentes)
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `ctx.interaction` | `Interaction` de discord.js | Objeto raw para accesos avanzados |
+| `ctx.customId` | `string` | `plugin:button:id` namespaced |
+| `ctx.values` | `string[]` | Valores elegidos (select); vacío para botón/modal |
+| `ctx.user` | `User` | Quien interactuó |
+| `ctx.channel` | `TextBasedChannel \| null` | Canal donde ocurrió |
+| `ctx.guild` | `Guild \| null` | Servidor (null en DMs) |
+| `ctx.reply(c)` | `Promise` | Responde. Acepta `string` o `{ content, ephemeral, embeds, components, … }` |
+| `ctx.deferReply(opts?)` | `Promise` | Muestra "pensando…". Usa si el handler tarda > 3s |
+| `ctx.editReply(c)` | `Promise` | Edita la respuesta aplazada |
+| `ctx.showModal(m)` | `Promise` | Abre un modal (solo desde botón/select) |
+
+**Reglas importantes:**
+- Las interacciones expiran en **3 segundos**. Si el handler tarda, llama `ctx.deferReply()` al inicio y `ctx.editReply(…)` al final.
+- Máx **5 botones** por ActionRow · máx **5 ActionRows** por mensaje.
+- Un ActionRow con select menu no puede contener otros componentes.
+- Un modal puede tener máx **5 ActionRows** con **1 TextInput** cada uno.
+- Los componentes se retiran solos al recargar/apagar el plugin. Sin handlers huérfanos.
 
 ## Endpoints públicos (`api.http`)
 
@@ -314,3 +507,32 @@ channelId = ""
 ```
 
 Se valida con TOML estricto antes de guardar; cada guardado crea una revisión en Postgres (`plugin_config_revisions`).
+
+## Historial de versiones (VCS lite)
+
+Cada vez que guardas código, config o schema desde el panel (o con el botón "Guardar y recargar"), se crea automáticamente un **snapshot** del estado completo del plugin (`plugin.js` + `config.toml` + `schema.yml`) antes de sobreescribir.
+
+Accede desde la pestaña **Historial** del editor:
+
+- **Lista cronológica** de revisiones con fecha, autor y vista previa del código.
+- **Ver detalle**: haz clic en una revisión para ver las 3 columnas completas.
+- **Guardar punto ahora**: snapshot manual con etiqueta opcional (`"antes del refactor"`, `"versión estable"`…).
+- **Restaurar**: vuelve el plugin al estado exacto de esa revisión (pide confirmación; el estado actual se guarda como nueva revisión antes de restaurar). Hot reload automático.
+- **Eliminar**: borra una revisión individual.
+
+**Huérfanos:** si la carpeta del plugin se borra directamente desde el FS (fuera del panel), las revisiones quedan marcadas con badge *"plugin eliminado"*. El botón **Restaurar plugin** recrea la carpeta y carga el plugin desde esa revisión.
+
+Si el plugin se borra **desde el panel** (botón Eliminar en la lista), todas sus revisiones se eliminan también — es una acción intencional.
+
+**TTL:** las revisiones con más de **14 días** se purgan automáticamente al arrancar el servidor y cada 24h.
+
+**API REST** (requiere sesión de admin):
+
+```
+GET    /api/plugins/:id/revisions                    → lista de revisiones
+POST   /api/plugins/:id/revisions                    → snapshot manual { label? }
+GET    /api/plugins/:id/revisions/:revId             → detalle completo
+POST   /api/plugins/:id/revisions/:revId/restore     → restaurar
+DELETE /api/plugins/:id/revisions/:revId             → eliminar revisión
+GET    /api/plugins/_orphans                         → plugins con revisiones pero sin carpeta
+```

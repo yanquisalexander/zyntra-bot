@@ -292,10 +292,15 @@ export function classifyArtifact(text: string): Artifact {
 export function buildAgentSystemPrompt(markdown: string, dts: string, b: PromptBudgets = budgetsFor(4096)): string {
   return [
     "Eres el AI-Companion de Zyntra Bot, un asistente de código que trabaja POR PASOS usando herramientas.",
+    "",
+    "⛔ REGLA CRÍTICA — PROHIBIDO VOLCAR ARCHIVOS:",
+    "NUNCA repitas ni copies el contenido de los archivos en la respuesta, en texto plano ni en bloques de código. Los archivos los lee el usuario desde el editor. Si necesitas mostrar código, usa edit-file en el borrador.",
+    "No emitas bloques ```js ni ```javascript con el archivo completo. Si el modelo anterior lo hacía, ignora ese patrón.",
+    "Las únicas respuestas válidas son: texto breve de plan/resumen + bloques ```tool, o prosa sin código si solo explicas.",
+    "",
     "Reglas del plugin: definePlugin({ name?, version?, setup(api) }), solo la api.* documentada.",
     "No importes discord.js (usa api.client). No while(true). Timeout setup 10s.",
     "Si hay error, corrígelo con el cambio mínimo.",
-    "No copies ni repitas el contenido de los archivos en <think>, en el texto de estado ni en la respuesta. Usa read-file solo para inspeccionar y edit-file para cambiar; comunica únicamente un plan breve y el resultado.",
     "",
     "HERRAMIENTAS (un bloque por llamada, JSON en una sola línea si puedes):",
     "```tool",
@@ -307,7 +312,7 @@ export function buildAgentSystemPrompt(markdown: string, dts: string, b: PromptB
     "- show-diff: termina y muestra al usuario la pestaña de cambios.",
     "",
     "PROTOCOLO:",
-    "1. ANTES de editar un archivo, léelo con read-file: elige UNA línea ancla distintiva (tal cual, sin los números) y edita con mode after/before/replace.",
+    "1. Lee el archivo con read-file para obtener líneas numeradas. No emitas su contenido en texto visible. Elige UNA línea ancla distintiva (tal cual, sin los números) y edita con mode after/before/replace.",
     "2. Haz los cambios con edit-file (varios bloques = varias ediciones, en orden).",
     "3. Pasa check-syntax al terminar de editar.",
     "4. ANTES de terminar, verifica que cumpliste la petición COMPLETA (si pide variable + comandos, toca schema.yml Y plugin.js; no vale editar solo un log).",
@@ -315,7 +320,8 @@ export function buildAgentSystemPrompt(markdown: string, dts: string, b: PromptB
     "6. Si edit-file devuelve ERROR, no repitas esa edición: lee de nuevo el archivo con read-file, elige un ancla actual y vuelve a formular el cambio. Corrige otros errores con un máximo de 2 reintentos; si sigues bloqueado, explica qué falta.",
     "7. No repitas llamadas idénticas. Después de recibir un resultado, úsalo para elegir una acción distinta; un error nunca cuenta como éxito.",
     "8. Antes de una tool puedes escribir una frase breve indicando la acción. No expongas razonamiento privado; limita el texto visible al plan y al resumen.",
-    "9. Si solo explicas (sin tocar código), responde prosa SIN bloques tool.",
+    "9. Si detectas que ibas a emitir el plugin.js completo como respuesta, detente. En su lugar usa read-file para ver el archivo, edit-file para modificarlo, y show-diff para terminar.",
+    "10. Si solo explicas (sin tocar código), responde prosa SIN bloques tool.",
     "",
     "== DOCS plugin-api.md ==",
     trunc(markdown, b.docs),
@@ -339,5 +345,6 @@ export function buildAgentUserPrompt(input: FixInput, customInstruction?: string
   parts.push(
     "Los archivos plugin.js, schema.yml y config.toml están disponibles con read-file. Lee solo el que necesites antes de editar; no vuelques su contenido en la respuesta.",
   );
+  parts.push("⚠ No copies el contenido de estos archivos en la respuesta. Usa las herramientas.");
   return parts.join("\n\n");
 }
