@@ -5,5 +5,3 @@ data/plugins/*/
 data/.cache/
 .env
 *.log
-drizzle/*.sql
-drizzle/meta/

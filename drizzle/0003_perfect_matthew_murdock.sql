@@ -1,0 +1,1 @@
+ALTER TABLE "plugin_revisions" ADD COLUMN "schema_yml" text DEFAULT '' NOT NULL;
