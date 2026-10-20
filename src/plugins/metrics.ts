@@ -35,7 +35,9 @@ interface Sample {
 }
 
 interface OpState {
-  samples: Sample[];
+  command: Sample[];
+  http: Sample[];
+  job: Sample[];
   startupMs: number | null;
 }
 
@@ -73,7 +75,7 @@ export class PluginMetrics {
   private stateOf(name: string): OpState {
     let s = this.states.get(name);
     if (!s) {
-      s = { samples: [], startupMs: null };
+      s = { command: [], http: [], job: [], startupMs: null };
       this.states.set(name, s);
     }
     return s;
@@ -81,7 +83,7 @@ export class PluginMetrics {
 
   private push(name: string, op: Op, ms: number, ok: boolean, error?: string): void {
     const s = this.stateOf(name);
-    const arr = (s as unknown as { command: Sample[]; http: Sample[]; job: Sample[] })[op];
+    const arr = s[op];
     arr.push({ ts: Date.now(), ms, ok, error });
     if (arr.length > WINDOW) arr.shift();
 
@@ -127,16 +129,13 @@ export class PluginMetrics {
   getSnapshot(name: string): PluginMetricsDTO | null {
     if (!this.states.has(name)) return null;
     const s = this.stateOf(name);
-    const cmd = (s as unknown as { command: Sample[] }).command;
-    const http = (s as unknown as { http: Sample[] }).http;
-    const job = (s as unknown as { job: Sample[] }).job;
     const proc = this.processSnap.get(name) ?? { rssMb: 0, heapMb: 0, cpuPercent: 0, at: 0 };
     return {
       name,
       startupMs: s.startupMs,
-      command: windowOf(cmd),
-      http: windowOf(http),
-      job: windowOf(job),
+      command: windowOf(s.command),
+      http: windowOf(s.http),
+      job: windowOf(s.job),
       rssMb: proc.rssMb,
       heapMb: proc.heapMb,
       cpuPercent: proc.cpuPercent,
