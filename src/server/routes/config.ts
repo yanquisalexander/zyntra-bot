@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getSessionUser, requireAdmin } from "../session.js";
 import { env } from "../env.js";
+import { eq, sql } from "drizzle-orm";
 
 const DEFAULTS = {
   prefix: "!",
@@ -67,12 +68,21 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
       const { eq } = await import("drizzle-orm");
       const db = getDb();
       for (const [key, value] of Object.entries(safe)) {
-        const val = key === "guildId" && typeof value === "string" ? value : value;
         const ex = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
-        if (ex.length === 0) {
-          await db.insert(botConfig).values({ key, val } as never);
+        // guildId es un snowflake de Discord: puede superar Number.MAX_SAFE_INTEGER.
+        // Forzamos cast a jsonb desde string para que Postgres lo almacene como
+        // string JSON ("700185692826763264") y no como número (700185692826763300),
+        // que pg devolvería como number JS perdiendo precisión.
+        if (key === "guildId" && typeof value === "string") {
+          if (ex.length === 0) {
+            await db.insert(botConfig).values({ key, value: sql`${value}::jsonb` as never });
+          } else {
+            await db.update(botConfig).set({ value: sql`${value}::jsonb` }).where(eq(botConfig.key, key));
+          }
+        } else if (ex.length === 0) {
+          await db.insert(botConfig).values({ key, value } as never);
         } else {
-          await db.update(botConfig).set({ value: val } as never).where(eq(botConfig.key, key));
+          await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
         }
       }
       if (typeof safe.prefix === "string") onPrefix?.(safe.prefix);
