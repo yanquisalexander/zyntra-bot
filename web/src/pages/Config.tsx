@@ -166,6 +166,9 @@ export default function Config() {
                   className="h-10 w-full rounded-xl border border-input bg-[#1a1a1a] px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 [color-scheme:dark]"
                 >
                   <option value="">Sin elegir</option>
+                  {guildId && !guilds.some((g) => g.id === guildId) && (
+                    <option value={guildId}>Guardado ({guildId}) · el bot ya no lo encuentra</option>
+                  )}
                   {guilds.map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.name} ({g.memberCount} miembros)
@@ -176,6 +179,11 @@ export default function Config() {
               <span className="mt-1.5 block text-[11px] text-muted-foreground">
                 Los comandos y eventos de otros servidores se ignoran. Los ajustes con roles usan este servidor.
               </span>
+              {guildId && !guilds.some((g) => g.id === guildId) && (
+                <span className="mt-1.5 block text-[11px] text-[#ffb700]">
+                  El ID sigue guardado, pero el bot no lo devuelve entre sus servidores. Comprueba que siga dentro del servidor y vuelve a cargar esta página.
+                </span>
+              )}
             </label>
           )}
         </CardContent>
