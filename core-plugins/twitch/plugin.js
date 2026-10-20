@@ -358,7 +358,25 @@ definePlugin({
         if (!rotated && !moved && prevSub && liveIds.has(prevSub)) {
           kept.add(prevSub);
           next[item.login] = next[item.login] || {};
+          next[item.login].broadcasterId = item.bid;
           next[item.login][item.type === "stream.online" ? "online" : "offline"] = prevSub;
+          continue;
+        }
+        // El estado local puede haberse perdido (p. ej. restauración de DB o
+        // recreación de vars). Reutiliza la sub activa de Twitch para evitar
+        // crear un duplicado y recibir HTTP 409.
+        const existingSub = !rotated && !moved
+          ? existing.find((s) =>
+              s.type === item.type &&
+              String((s.condition && s.condition.broadcaster_user_id) || "") === item.bid
+            )
+          : null;
+        if (existingSub) {
+          kept.add(existingSub.id);
+          next[item.login] = next[item.login] || { broadcasterId: item.bid };
+          next[item.login].broadcasterId = item.bid;
+          next[item.login][item.type === "stream.online" ? "online" : "offline"] = existingSub.id;
+          api.log.info(`twitch: sub ${item.type} para ${item.login} ya existía; reutilizada`);
           continue;
         }
         try {
