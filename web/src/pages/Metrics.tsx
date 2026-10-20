@@ -22,6 +22,7 @@ interface PluginMetrics {
   name: string;
   startupMs: number | null;
   command: MetricWindow;
+  slash?: MetricWindow;
   http: MetricWindow;
   job: MetricWindow;
   rssMb: number;
@@ -39,10 +40,20 @@ interface Plugin {
 }
 
 const OPERATIONS = [
-  { key: "command", label: "Comandos" },
+  { key: "command", label: "Comandos con prefijo" },
+  { key: "slash", label: "Comandos slash" },
   { key: "http", label: "HTTP" },
   { key: "job", label: "Tareas" },
 ] as const;
+
+const EMPTY_METRIC: MetricWindow = {
+  count: 0,
+  errors: 0,
+  avgMs: 0,
+  p95Ms: 0,
+  lastMs: null,
+  lastOk: null,
+};
 
 export default function Metrics() {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
@@ -78,8 +89,8 @@ export default function Metrics() {
     const metrics = plugins.map((p) => p.metrics).filter((m): m is PluginMetrics => !!m);
     return {
       active: plugins.filter((p) => p.status === "active").length,
-      calls: metrics.reduce((sum, m) => sum + m.command.count + m.http.count + m.job.count, 0),
-      errors: metrics.reduce((sum, m) => sum + m.command.errors + m.http.errors + m.job.errors, 0),
+      calls: metrics.reduce((sum, m) => sum + m.command.count + (m.slash?.count ?? 0) + m.http.count + m.job.count, 0),
+      errors: metrics.reduce((sum, m) => sum + m.command.errors + (m.slash?.errors ?? 0) + m.http.errors + m.job.errors, 0),
       process: metrics[0] ?? null,
     };
   }, [plugins]);
@@ -148,9 +159,9 @@ export default function Metrics() {
                   </div>
                   {plugin.metrics ? (
                     <>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
                         {OPERATIONS.map(({ key, label }) => (
-                          <OperationMetric key={key} label={label} metric={plugin.metrics![key]} />
+                          <OperationMetric key={key} label={label} metric={plugin.metrics![key] ?? EMPTY_METRIC} />
                         ))}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">

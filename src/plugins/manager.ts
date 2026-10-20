@@ -63,11 +63,21 @@ export class PluginManager {
   private enabled = new Map<string, boolean>();
   private locks = new Map<string, Promise<unknown>>();
   private corePlugins = new Set<string>();
+  private _guildId = "";
   /** Bus inter-plugin: evento completo (`<plugin>:<evento>`) → suscriptores. */
   private bus = new Map<string, Set<{ plugin: string; handler: (...a: never[]) => unknown }>>();
   prefix = "!";
   /** Servidor único (guildId). Vacío = todos (comportamiento actual). */
-  guildId = "";
+  get guildId(): string {
+    return this._guildId;
+  }
+
+  set guildId(value: string) {
+    const next = value || "";
+    if (next === this._guildId) return;
+    this._guildId = next;
+    if (next && this.client.isReady()) void this.registerAllSlashCommands();
+  }
   readonly scheduler = new JobScheduler();
   readonly ui = new UiRegistry();
 
@@ -84,6 +94,11 @@ export class PluginManager {
     // Interacciones de Discord: slash commands, botones, selects, modales.
     client.on("interactionCreate", (interaction) => {
       void this.dispatchInteraction(interaction as never);
+    });
+    // El autoload puede terminar antes de que Discord esté listo. Reintenta
+    // publicar los comandos cuando la conexión ya puede usar la REST API.
+    client.on("ready", () => {
+      void this.registerAllSlashCommands();
     });
   }
 
@@ -139,7 +154,8 @@ export class PluginManager {
   async registerSlashCommands(plugin: string): Promise<void> {
     const l = this.loaded.get(plugin);
     if (!l) return;
-    const entries = [...l.registry.commands.entries()].filter(([, e]) => e.slash);
+    const winners = this.commandWinners();
+    const entries = [...l.registry.commands.entries()].filter(([name, e]) => e.slash && winners.get(name) === plugin);
     if (entries.length === 0) return;
     if (!this.guildId || !this.client.isReady() || !this.client.user) return;
     const url = `https://discord.com/api/v10/applications/${this.client.user.id}/guilds/${this.guildId}/commands`;
@@ -151,7 +167,9 @@ export class PluginManager {
       };
       try {
         const res = await fetch(url, {
-          method: "PUT",
+          // POST crea o actualiza este comando por nombre. PUT reemplaza la
+          // lista completa del guild, así que no debe usarse por comando.
+          method: "POST",
           headers: { Authorization: `Bot ${this.client.token}`, "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
@@ -166,6 +184,20 @@ export class PluginManager {
       } catch (e) {
         logger.warn(`plugin:${plugin}`, `slash /${name}: ${String(e).split("\n")[0]}`);
       }
+    }
+  }
+
+  private async registerAllSlashCommands(): Promise<void> {
+    if (!this.client.isReady() || !this.client.user) return;
+    if (!this.guildId) {
+      const hasSlashCommands = [...this.loaded.values()].some((plugin) =>
+        [...plugin.registry.commands.values()].some((command) => !!command.slash),
+      );
+      if (hasSlashCommands) logger.warn("bot", "slash commands pendientes: elige el servidor del bot en Configuración");
+      return;
+    }
+    for (const plugin of this.loaded.keys()) {
+      await this.registerSlashCommands(plugin);
     }
   }
 
@@ -299,7 +331,7 @@ export class PluginManager {
         ok = false;
         logger.error(`plugin:${plugin}`, `slash /${cmdName}: ${String(e)}`);
       } finally {
-        pluginMetrics.command(plugin, Date.now() - c0, ok);
+        pluginMetrics.slash(plugin, Date.now() - c0, ok);
       }
       return;
     }

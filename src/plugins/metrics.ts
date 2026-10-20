@@ -17,6 +17,7 @@ export interface PluginMetricsDTO {
   name: string;
   startupMs: number | null;
   command: MetricWindow;
+  slash: MetricWindow;
   http: MetricWindow;
   job: MetricWindow;
   rssMb: number;
@@ -25,7 +26,7 @@ export interface PluginMetricsDTO {
   updatedAt: string;
 }
 
-type Op = "command" | "http" | "job";
+type Op = "command" | "slash" | "http" | "job";
 
 interface Sample {
   ts: number;
@@ -36,6 +37,7 @@ interface Sample {
 
 interface OpState {
   command: Sample[];
+  slash: Sample[];
   http: Sample[];
   job: Sample[];
   startupMs: number | null;
@@ -75,7 +77,7 @@ export class PluginMetrics {
   private stateOf(name: string): OpState {
     let s = this.states.get(name);
     if (!s) {
-      s = { command: [], http: [], job: [], startupMs: null };
+      s = { command: [], slash: [], http: [], job: [], startupMs: null };
       this.states.set(name, s);
     }
     return s;
@@ -102,6 +104,10 @@ export class PluginMetrics {
 
   command(name: string, ms: number, ok: boolean, error?: string): void {
     this.push(name, "command", ms, ok, error);
+  }
+
+  slash(name: string, ms: number, ok: boolean, error?: string): void {
+    this.push(name, "slash", ms, ok, error);
   }
 
   http(name: string, ms: number, ok: boolean, error?: string): void {
@@ -134,6 +140,7 @@ export class PluginMetrics {
       name,
       startupMs: s.startupMs,
       command: windowOf(s.command),
+      slash: windowOf(s.slash),
       http: windowOf(s.http),
       job: windowOf(s.job),
       rssMb: proc.rssMb,
