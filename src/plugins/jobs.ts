@@ -2,6 +2,7 @@ import { CronExpressionParser } from "cron-parser";
 import { v7 as uuidv7 } from "uuid";
 import { logger } from "./logger.js";
 import { runWithPlugin } from "./consoleBridge.js";
+import { pluginMetrics } from "./metrics.js";
 
 /**
  * Mini-sidekiq in-process: tareas recurrentes (intervalo/cron) y one-shots
@@ -584,7 +585,9 @@ export class JobScheduler {
     } finally {
       if (timer) clearTimeout(timer);
       run.finishedAt = new Date().toISOString();
-      run.durationMs = Date.now() - t0;
+      const durationMs = Date.now() - t0;
+      run.durationMs = durationMs;
+      pluginMetrics.job(s.plugin, durationMs, run.ok === true, run.error);
       s.running = false;
       this.inFlight.delete(s.id);
       s.lastRunAt = t0;
