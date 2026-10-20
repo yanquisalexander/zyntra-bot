@@ -287,11 +287,11 @@ export default function Config() {
       <Card>
         <CardHeader>
           <CardTitle>Resumen actual</CardTitle>
-          <CardDescription>Así está guardado ahora mismo</CardDescription>
+          <CardDescription>Valor que devolvió el servidor al cargar o guardar</CardDescription>
         </CardHeader>
         <CardContent>
           <pre className="max-h-[50vh] overflow-auto rounded-xl border border-border bg-[#101010] p-4 font-mono text-xs leading-relaxed text-zinc-300">
-            {loading ? "Cargando…" : JSON.stringify({ ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel, devModeEnabled }, null, 2)}
+            {loading ? "Cargando…" : JSON.stringify(cfg, null, 2)}
           </pre>
         </CardContent>
       </Card>
