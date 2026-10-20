@@ -78,6 +78,9 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
           const upd = await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
           logger.info("server", `PUT /api/config key=${key} updated`);
         }
+        // Verificar inmediatamente qué hay en la DB tras escribir
+        const after = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
+        logger.info("server", `PUT /api/config key=${key} verifyInDb value=${JSON.stringify(after[0]?.value)}`);
       }
       if (typeof safe.prefix === "string") onPrefix?.(safe.prefix);
       if (typeof safe.guildId === "string") onGuildId?.(safe.guildId);
