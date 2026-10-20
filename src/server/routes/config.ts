@@ -70,8 +70,14 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
       for (const [key, value] of Object.entries(safe)) {
         logger.info("server", `PUT /api/config saving key=${key} value=${String(value).slice(0, 100)}`);
         const ex = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
-        if (ex.length === 0) await db.insert(botConfig).values({ key, value } as never);
-        else await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
+        logger.info("server", `PUT /api/config key=${key} existingRows=${ex.length}`);
+        if (ex.length === 0) {
+          const ins = await db.insert(botConfig).values({ key, value } as never);
+          logger.info("server", `PUT /api/config key=${key} inserted`);
+        } else {
+          const upd = await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
+          logger.info("server", `PUT /api/config key=${key} updated`);
+        }
       }
       if (typeof safe.prefix === "string") onPrefix?.(safe.prefix);
       if (typeof safe.guildId === "string") onGuildId?.(safe.guildId);
