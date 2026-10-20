@@ -48,10 +48,12 @@ app.route("/api/config", configRoutes((p) => {
 
 // Hidrata prefijo y servidor al arrancar (si no, el filtro single-server
 // y el prefijo guardado no aplicarían hasta el próximo guardado).
-readBotConfig().then((cfg) => {
-  if (typeof cfg.prefix === "string" && cfg.prefix) manager.prefix = cfg.prefix;
-  if (typeof cfg.guildId === "string") manager.guildId = cfg.guildId;
-}).catch(() => undefined);
+  readBotConfig().then((cfg) => {
+    if (typeof cfg.prefix === "string" && cfg.prefix) manager.prefix = cfg.prefix;
+    const rawGid = cfg.guildId;
+    if (typeof rawGid === "string" && rawGid) manager.guildId = rawGid;
+    else if (typeof rawGid === "number" && Number.isFinite(rawGid)) manager.guildId = String(rawGid);
+  }).catch(() => undefined);
 app.route("/api/logs", logsRoutes(manager));
 app.route("/api/bot", botRoutes());
 app.route("/api/discord", discordRoutes());

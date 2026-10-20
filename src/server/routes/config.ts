@@ -22,7 +22,16 @@ async function readAll(): Promise<Record<string, unknown>> {
     const { botConfig } = await import("../../db/schema.js");
     const rows = await getDb().select().from(botConfig);
     const out: Record<string, unknown> = { ...DEFAULTS };
-    for (const r of rows as { key: string; value: unknown }[]) out[r.key] = r.value;
+    for (const r of rows as { key: string; value: unknown }[]) {
+      let value = r.value;
+      // Los snowflakes de Discord deben viajar como texto. Si en la DB quedó
+      // como número (jsonb), lo normalizamos a string para evitar que el
+      // manager y el frontend lo ignoren por no ser string.
+      if (r.key === "guildId" && typeof value === "number" && Number.isFinite(value)) {
+        value = String(value);
+      }
+      out[r.key] = value;
+    }
     return out;
   } catch {
     return { ...DEFAULTS };
