@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getSessionUser, requireAdmin } from "../session.js";
 import { env } from "../env.js";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 const DEFAULTS = {
   prefix: "!",
@@ -11,6 +11,29 @@ const DEFAULTS = {
   aiCompanionEnabled: false,
   aiCompanionModel: "Llama-3.2-1B-Instruct-q4f16_1-MLC",
 };
+
+/** Prefix para snowflakes de Discord en jsonb: evita que pg los lea como
+ * número y pierda precisión sobre Number.MAX_SAFE_INTEGER. El resto del
+ * código siempre ve el ID puro sin prefix. */
+const GUILD_ID_PREFIX = "g";
+
+function encodeGuildId(value: unknown): string {
+  const s = typeof value === "string" ? value : String(value ?? "");
+  return s.startsWith(GUILD_ID_PREFIX) ? s : `${GUILD_ID_PREFIX}${s}`;
+}
+
+function decodeGuildId(value: unknown): string {
+  if (typeof value === "string") {
+    return value.startsWith(GUILD_ID_PREFIX) ? value.slice(1) : value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    // Valor legacy corrupto por precisión: mejor devolverlo como string
+    // aunque ya esté dañado; el frontend lo mostrará y el usuario podrá
+    // volver a elegir el servidor correcto.
+    return String(value);
+  }
+  return "";
+}
 
 /** Lee la config del bot (DB; sin DB devuelve defaults). */
 export async function readBotConfig(): Promise<Record<string, unknown>> {
@@ -25,11 +48,8 @@ async function readAll(): Promise<Record<string, unknown>> {
     const out: Record<string, unknown> = { ...DEFAULTS };
     for (const r of rows as { key: string; value: unknown }[]) {
       let value = r.value;
-      // Los snowflakes de Discord deben viajar como texto. Si en la DB quedó
-      // como número (jsonb), lo normalizamos a string para evitar que el
-      // manager y el frontend lo ignoren por no ser string.
-      if (r.key === "guildId" && typeof value === "number" && Number.isFinite(value)) {
-        value = String(value);
+      if (r.key === "guildId") {
+        value = decodeGuildId(value);
       }
       out[r.key] = value;
     }
@@ -69,20 +89,16 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
       const db = getDb();
       for (const [key, value] of Object.entries(safe)) {
         const ex = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
-        // guildId es un snowflake de Discord: puede superar Number.MAX_SAFE_INTEGER.
-        // Forzamos cast a jsonb desde string para que Postgres lo almacene como
-        // string JSON ("700185692826763264") y no como número (700185692826763300),
-        // que pg devolvería como number JS perdiendo precisión.
-        if (key === "guildId" && typeof value === "string") {
-          if (ex.length === 0) {
-            await db.insert(botConfig).values({ key, value: sql`${value}::jsonb` as never });
-          } else {
-            await db.update(botConfig).set({ value: sql`${value}::jsonb` }).where(eq(botConfig.key, key));
-          }
-        } else if (ex.length === 0) {
-          await db.insert(botConfig).values({ key, value } as never);
+        // guildId es un snowflake de Discord: puede superar
+        // Number.MAX_SAFE_INTEGER. Guardamos con prefix "g" para que Postgres
+        // lo almacene como string JSON ("g700185692826763264") y nunca como
+        // número (700185692826763300), que pg devolvería como number JS
+        // perdiendo precisión. El resto del código recibe el ID puro.
+        const stored = key === "guildId" && typeof value === "string" ? encodeGuildId(value) : value;
+        if (ex.length === 0) {
+          await db.insert(botConfig).values({ key, stored } as never);
         } else {
-          await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
+          await db.update(botConfig).set({ value: stored } as never).where(eq(botConfig.key, key));
         }
       }
       if (typeof safe.prefix === "string") onPrefix?.(safe.prefix);
