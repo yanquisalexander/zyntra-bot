@@ -1,3 +1,5 @@
+import { logFile } from "./logFile.js";
+
 export type LogLevel = "info" | "warn" | "error";
 export interface LogEntry {
   ts: string;
@@ -43,6 +45,7 @@ export function log(level: LogLevel, source: string, message: string, meta?: unk
   }
   if (level === "error") console.error(`[${source}]`, message);
   void persist(entry);
+  void logFile.write(entry);
 }
 
 export const logger = {

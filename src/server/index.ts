@@ -6,12 +6,15 @@ import { logger as honoLogger } from "hono/logger";
 import { env } from "./env.js";
 import { getSessionUser } from "./session.js";
 import { installConsoleBridge } from "../plugins/consoleBridge.js";
+import { logFile } from "../plugins/logFile.js";
 import { renderShell } from "./ssr.js";
 import { renderLoginPage } from "./loginPage.js";
 
 // Redirige los console.* de los plugins al logger (panel /logs + SSE).
 // Debe instalarse antes de cargar ningún plugin.
 installConsoleBridge();
+// Logs persistentes a disco (logs/YYYY/MM/DD.log) con rotación y autocleanup.
+await logFile.init().catch((e) => logger.error("server", `logFile init: ${String(e)}`));
 import { getClient } from "../bot/client.js";
 import { PluginManager } from "../plugins/manager.js";
 import { seedCorePlugins } from "../plugins/store.js";
@@ -123,6 +126,7 @@ for (const s of seeded) logger.info("server", `core plugin: ${s}`);
 manager.scheduler
   .hydrate()
   .catch((e) => logger.warn("server", `jobs hydrate: ${String(e)}`))
+  .then(() => manager.hydrateState())
   .then(() => manager.autoload())
   .then(() => {
     logger.info("server", "plugins autoload OK");

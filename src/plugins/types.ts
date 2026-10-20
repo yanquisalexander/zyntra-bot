@@ -1,4 +1,5 @@
 import type { Client } from "discord.js";
+import type { PluginMetricsDTO } from "./metrics.js";
 
 export type PluginStatus =
   | "disabled"
@@ -366,4 +367,8 @@ export interface PluginRecord {
   commands: PluginCommandInfo[];
   /** Endpoints públicos (`/plugin-routes/<plugin>/<path>`). Vacío si apagado. */
   routes: PluginRouteInfo[];
+  /** Duración del setup en ms (medido en carga/recarga). */
+  startupMs?: number | null;
+  /** Métricas de respuesta y consumo (llenadas por el registry de métricas). */
+  metrics?: PluginMetricsDTO | null;
 }

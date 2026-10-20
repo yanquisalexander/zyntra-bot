@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { runWithPlugin } from "../../plugins/consoleBridge.js";
 import { logger } from "../../plugins/logger.js";
+import { pluginMetrics } from "../../plugins/metrics.js";
 import type { PluginManager } from "../../plugins/manager.js";
 import type { HttpCtx } from "../../plugins/types.js";
 
@@ -92,6 +93,9 @@ export function pluginRoutes(manager: PluginManager): Hono {
     };
 
     let out: unknown;
+    const h0 = Date.now();
+    let httpOk = true;
+    let httpError: string | undefined;
     try {
       out = await Promise.race([
         runWithPlugin(plugin, () => entry.handler(ctx as never) as unknown),
@@ -100,10 +104,13 @@ export function pluginRoutes(manager: PluginManager): Hono {
         ),
       ]);
     } catch (e) {
-      const msg = String(e instanceof Error ? e.message : e).slice(0, 300);
-      logger.error(`plugin:${plugin}`, `http ${entry.method} /${entry.path}: ${msg}`);
-      if (msg.startsWith("timeout")) return c.json({ error: msg }, 504);
-      return c.json({ error: msg }, 500);
+      httpOk = false;
+      httpError = String(e instanceof Error ? e.message : e).slice(0, 300);
+      logger.error(`plugin:${plugin}`, `http ${entry.method} /${entry.path}: ${httpError}`);
+      if (httpError.startsWith("timeout")) return c.json({ error: httpError }, 504);
+      return c.json({ error: httpError }, 500);
+    } finally {
+      pluginMetrics.http(plugin, Date.now() - h0, httpOk, httpError);
     }
 
     if (out instanceof Response) return out;

@@ -17,6 +17,8 @@ import {
 import { parseSchemaYaml } from "./schema.js";
 import { varDefsFromSchema, type VarDef } from "./vars.js";
 import type { PluginDefinition, PluginRecord, PluginStatus } from "./types.js";
+import type { PluginMetricsDTO } from "./metrics.js";
+import { pluginMetrics } from "./metrics.js";
 
 interface Loaded {
   def: PluginDefinition;
@@ -25,6 +27,7 @@ interface Loaded {
   version: string;
   description?: string;
   displayName: string;
+  startupMs: number | null;
 }
 
 /** Nombre visible: `definePlugin({ name })`, o el ID de la carpeta. */
@@ -92,13 +95,18 @@ export class PluginManager {
     for (const [plugin, l] of this.loaded) {
       const entry = l.registry.commands.get(name);
       if (!entry) continue;
+      const c0 = Date.now();
+      let ok = true;
       try {
         await entry.handler(
           { message: msg, content: msg.content, args } as never,
           ...args,
         );
       } catch (e) {
+        ok = false;
         logger.error(`plugin:${plugin}`, `command !${name}: ${String(e)}`);
+      } finally {
+        pluginMetrics.command(plugin, Date.now() - c0, ok);
       }
       return; // primer registro gana
     }
@@ -261,6 +269,8 @@ export class PluginManager {
         if (val !== null && val !== undefined) args.push(String(val));
       }
 
+      const c0 = Date.now();
+      let ok = true;
       try {
         // Para slash, message es null. El handler puede detectarlo y usar
         // ctx.replyInteraction() para responder via la interaction.
@@ -286,7 +296,10 @@ export class PluginManager {
           ...args,
         );
       } catch (e) {
+        ok = false;
         logger.error(`plugin:${plugin}`, `slash /${cmdName}: ${String(e)}`);
+      } finally {
+        pluginMetrics.command(plugin, Date.now() - c0, ok);
       }
       return;
     }
@@ -308,6 +321,25 @@ export class PluginManager {
       // Caché de core (isCore es async; list/getStatus son sync).
       if (await isCore(n)) this.corePlugins.add(n);
       else this.corePlugins.delete(n);
+    }
+  }
+
+  /**
+   * Hidrata enabled/status desde la DB antes del autoload, así un plugin
+   * apagado sobrevive al reinicio (discover() no lo vuelve a encender).
+   */
+  async hydrateState(): Promise<void> {
+    try {
+      const { getDb } = await import("../db/client.js");
+      const { plugins } = await import("../db/schema.js");
+      const db = getDb();
+      const rows = await db.select().from(plugins);
+      for (const r of rows) {
+        this.enabled.set(r.name, r.enabled === true);
+        this.status.set(r.name, (r.status ?? "disabled") as PluginStatus);
+      }
+    } catch {
+      /* DB opcional */
     }
   }
 
@@ -349,6 +381,7 @@ export class PluginManager {
             emit: (source, evName, ...args) => this.emitBus(source, evName, ...args),
           },
         });
+        const t0 = Date.now();
         const setup = runWithPlugin(name, () => def.setup(api));
         if (setup instanceof Promise) {
           await Promise.race([
@@ -358,6 +391,8 @@ export class PluginManager {
             ),
           ]);
         }
+        const startupMs = Date.now() - t0;
+        pluginMetrics.startup(name, startupMs);
         this.loaded.set(name, {
           def,
           registry,
@@ -365,6 +400,7 @@ export class PluginManager {
           version: def.version ?? "0.1.0",
           description: def.description,
           displayName: displayNameOf(name, def),
+          startupMs,
         });
         this.status.set(name, "active");
         this.errors.delete(name);
@@ -419,6 +455,7 @@ export class PluginManager {
             emit: (source, evName, ...args) => this.emitBus(source, evName, ...args),
           },
         });
+        const t0 = Date.now();
         const setup = runWithPlugin(name, () => def.setup(api));
         if (setup instanceof Promise) {
           await Promise.race([
@@ -428,6 +465,8 @@ export class PluginManager {
             ),
           ]);
         }
+        const startupMs = Date.now() - t0;
+        pluginMetrics.startup(name, startupMs);
         this.loaded.set(name, {
           def,
           registry,
@@ -435,6 +474,7 @@ export class PluginManager {
           version: def.version ?? "0.1.0",
           description: def.description,
           displayName: displayNameOf(name, def),
+          startupMs,
         });
         this.status.set(name, "active");
         this.errors.delete(name);
@@ -656,6 +696,7 @@ export class PluginManager {
     const names = new Set([...this.status.keys(), ...this.loaded.keys(), ...this.enabled.keys()]);
     return [...names].map((name) => {
       const l = this.loaded.get(name);
+      pluginMetrics.sampleProcess(name);
       return {
         name,
         displayName: l?.displayName ?? name,
@@ -666,24 +707,35 @@ export class PluginManager {
         core: this.corePlugins.has(name),
         lastError: this.errors.get(name),
         lastLoadedAt: this.loadedAt.get(name),
+        startupMs: l?.startupMs ?? null,
         commands: this.commandsOf(name),
         routes: this.routesOf(name),
+        metrics: pluginMetrics.getSnapshot(name),
       };
     });
   }
 
   getStatus(name: string) {
+    pluginMetrics.sampleProcess(name);
+    const l = this.loaded.get(name);
     return {
       name,
-      displayName: this.loaded.get(name)?.displayName ?? name,
+      displayName: l?.displayName ?? name,
       status: this.status.get(name) ?? "disabled",
       enabled: this.enabled.get(name) ?? false,
       core: this.corePlugins.has(name),
       lastError: this.errors.get(name),
       lastLoadedAt: this.loadedAt.get(name),
+      startupMs: l?.startupMs ?? null,
       commands: this.commandsOf(name),
       routes: this.routesOf(name),
+      metrics: pluginMetrics.getSnapshot(name),
     };
+  }
+
+  /** Métricas detalladas de un plugin (comandos, HTTP, jobs, proceso). */
+  getMetrics(name: string): PluginMetricsDTO | null {
+    return pluginMetrics.getSnapshot(name);
   }
 
   private async persistMeta(name: string) {

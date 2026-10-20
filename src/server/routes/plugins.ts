@@ -100,6 +100,14 @@ export function pluginsRoutes(manager: PluginManager): Hono {
     }
   });
 
+  /** Métricas de un plugin: startup, comandos, HTTP, jobs, proceso. */
+  r.get("/:name/metrics", async (c) => {
+    const name = c.req.param("name");
+    const metrics = manager.getMetrics(name);
+    if (!metrics) return c.json({ error: "plugin no encontrado" }, 404);
+    return c.json({ metrics });
+  });
+
   r.put("/:name/code", async (c) => {
     const blocked = await coreGuard(c);
     if (blocked) return blocked;
