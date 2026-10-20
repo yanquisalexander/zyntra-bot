@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Save, ShieldAlert, Server, FlaskConical, Users, ListChecks } from "lucide-react";
+import { Save, ShieldAlert, Server, FlaskConical, Users, ListChecks, Code2 } from "lucide-react";
 import { api, bootstrap } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ export default function Config() {
   const [prefix, setPrefix] = useState("!");
   const [guildId, setGuildId] = useState("");
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [devModeEnabled, setDevModeEnabled] = useState(false);
   const [aiModel, setAiModel] = useState<string>(DEFAULT_AI_MODEL);
   const [deviceProfile] = useState(estimateDevice);
   const recommended = recommendModel(deviceProfile);
@@ -41,6 +42,7 @@ export default function Config() {
         if (typeof d.config.prefix === "string") setPrefix(d.config.prefix);
         if (typeof d.config.guildId === "string") setGuildId(d.config.guildId);
         if (typeof d.config.aiCompanionEnabled === "boolean") setAiEnabled(d.config.aiCompanionEnabled);
+        if (typeof d.config.devModeEnabled === "boolean") setDevModeEnabled(d.config.devModeEnabled);
         if (typeof d.config.aiCompanionModel === "string" && d.config.aiCompanionModel) {
           setAiModel(d.config.aiCompanionModel);
         }
@@ -59,9 +61,10 @@ export default function Config() {
     try {
       const d = await api<{ config: Record<string, unknown> }>("/api/config", {
         method: "PUT",
-        body: JSON.stringify({ ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel }),
+        body: JSON.stringify({ ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel, devModeEnabled }),
       });
-      setCfg(d.config ?? { ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel });
+      setCfg(d.config ?? { ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel, devModeEnabled });
+      window.dispatchEvent(new CustomEvent("zyntra:config-updated", { detail: d.config }));
       setMsg("Guardado ✓ — ya se está usando");
     } catch (e) {
       setErr(String(e instanceof Error ? e.message : e));
@@ -85,6 +88,27 @@ export default function Config() {
 
       {err && <AlertError message={err} />}
       {msg && <AlertOk message={msg} />}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Code2 className="size-4 text-[#8b93ff]" />
+            Desarrollo
+            <Badge variant={devModeEnabled ? "violet" : "secondary"}>{devModeEnabled ? "activo" : "apagado"}</Badge>
+          </CardTitle>
+          <CardDescription>Habilita una página independiente con métricas de ejecución.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Switch
+            checked={devModeEnabled}
+            onChange={setDevModeEnabled}
+            label="Activar DEV Mode y mostrar métricas"
+          />
+          <p className="mt-2 max-w-xl text-[11px] leading-relaxed text-muted-foreground">
+            Incluye llamadas, errores, latencia y memoria/CPU del proceso. Guarda los cambios para aplicarlo.
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -225,7 +249,7 @@ export default function Config() {
         </CardHeader>
         <CardContent>
           <pre className="max-h-[50vh] overflow-auto rounded-xl border border-border bg-[#101010] p-4 font-mono text-xs leading-relaxed text-zinc-300">
-            {loading ? "Cargando…" : JSON.stringify({ ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel }, null, 2)}
+            {loading ? "Cargando…" : JSON.stringify({ ...cfg, prefix, guildId, aiCompanionEnabled: aiEnabled, aiCompanionModel: aiModel, devModeEnabled }, null, 2)}
           </pre>
         </CardContent>
       </Card>

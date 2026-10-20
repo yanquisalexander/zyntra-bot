@@ -10,6 +10,7 @@ import Jobs from "@/pages/Jobs";
 import PluginTab from "@/pages/PluginTab";
 import PluginRoutes from "@/pages/Routes";
 import Setup from "@/pages/Setup";
+import Metrics from "@/pages/Metrics";
 
 function NotFound() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/plugins" element={<Plugins />} />
+        <Route path="/metrics" element={<Metrics />} />
         <Route path="/plugins/:name" element={<Editor />} />
         <Route path="/config" element={<Config />} />
         <Route path="/logs" element={<Logs />} />

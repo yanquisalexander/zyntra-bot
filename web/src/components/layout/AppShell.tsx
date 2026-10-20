@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Users,
   Webhook,
+  Activity,
 } from "lucide-react";
 import { api, bootstrap, discordAvatarUrl, type BootstrapPlugin, type PanelUser } from "@/lib/api";
 import Setup from "@/pages/Setup";
@@ -59,6 +60,7 @@ export default function AppShell() {
   const [user, setUser] = useState<PanelUser | null>(boot.user ?? null);
   const [open, setOpen] = useState(false);
   const [authDone, setAuthDone] = useState(!!boot.user);
+  const [devModeEnabled, setDevModeEnabled] = useState(false);
   const location = useLocation();
   const bot = useBotStatus();
   const uiTabs = useUiTabs(!!user);
@@ -70,6 +72,29 @@ export default function AppShell() {
       .then((d) => setUser(d.user))
       .catch(() => undefined)
       .finally(() => setAuthDone(true));
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const syncConfig = (config?: Record<string, unknown>) => {
+      if (config) {
+        setDevModeEnabled(config.devModeEnabled === true);
+        return;
+      }
+      api<{ config: Record<string, unknown> }>("/api/config")
+        .then((d) => alive && setDevModeEnabled(d.config.devModeEnabled === true))
+        .catch(() => undefined);
+    };
+    const onConfigUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail;
+      syncConfig(detail);
+    };
+    syncConfig();
+    window.addEventListener("zyntra:config-updated", onConfigUpdated);
+    return () => {
+      alive = false;
+      window.removeEventListener("zyntra:config-updated", onConfigUpdated);
+    };
   }, []);
 
   useEffect(() => {
@@ -136,7 +161,7 @@ export default function AppShell() {
 
       {/* Nav */}
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-3">
-        {NAV.map((item) => (
+        {[...NAV, ...(devModeEnabled ? [{ to: "/metrics", label: "Métricas", icon: Activity, end: true }] : [])].map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
