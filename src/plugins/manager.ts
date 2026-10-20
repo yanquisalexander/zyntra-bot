@@ -336,7 +336,10 @@ export class PluginManager {
       const rows = await db.select().from(plugins);
       for (const r of rows) {
         this.enabled.set(r.name, r.enabled === true);
-        this.status.set(r.name, (r.status ?? "disabled") as PluginStatus);
+        // `status` describes a live runtime and is stale after a process
+        // restart. Restore only the desired enabled state; autoload will set
+        // loading/active/error based on this process's actual result.
+        this.status.set(r.name, "disabled");
       }
     } catch {
       /* DB opcional */
@@ -346,7 +349,10 @@ export class PluginManager {
   async autoload() {
     await this.discover();
     for (const [name, en] of this.enabled) {
-      if (en && this.status.get(name) !== "active") {
+      // El estado "active" de la DB pertenece al proceso anterior. Solo la
+      // presencia en `loaded` confirma que el plugin está cargado en esta
+      // instancia; tras reiniciar el proceso siempre hay que volver a cargarlo.
+      if (en && !this.loaded.has(name)) {
         await this.load(name).catch(() => undefined);
       }
     }
