@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getSessionUser, requireAdmin } from "../session.js";
 import { env } from "../env.js";
+import { logger } from "../../plugins/logger.js";
 
 const DEFAULTS = {
   prefix: "!",
@@ -44,6 +45,7 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
   r.get("/", async (c) => c.json({ config: await readAll(), bypassAdminServerCheck: env.BYPASS_ADMIN_SERVER_CHECK, secretsConfigured: { token: !!process.env.DISCORD_TOKEN } }));
   r.put("/", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
+    logger.info("server", `PUT /api/config keys=${Object.keys(body).join(",")} guildId=${String(body.guildId)}`);
     // Nunca aceptar secretos por esta ruta.
     const { DISCORD_TOKEN, CLIENT_SECRET, SESSION_SECRET, ...safe } = body as Record<string, unknown>;
     void DISCORD_TOKEN;
@@ -66,14 +68,18 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
       const { eq } = await import("drizzle-orm");
       const db = getDb();
       for (const [key, value] of Object.entries(safe)) {
+        logger.info("server", `PUT /api/config saving key=${key} value=${String(value).slice(0, 100)}`);
         const ex = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
         if (ex.length === 0) await db.insert(botConfig).values({ key, value } as never);
         else await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
       }
       if (typeof safe.prefix === "string") onPrefix?.(safe.prefix);
       if (typeof safe.guildId === "string") onGuildId?.(safe.guildId);
-      return c.json({ ok: true, config: await readAll() });
+      const config = await readAll();
+      logger.info("server", `PUT /api/config done readAll guildId=${config.guildId}`);
+      return c.json({ ok: true, config });
     } catch (e) {
+      logger.error("server", `PUT /api/config error: ${String(e)}`);
       return c.json({ error: `DB no disponible: ${String(e)}` }, 500);
     }
   });

@@ -76,11 +76,22 @@ export default function Config() {
         const availableGuilds = Array.isArray(d.guilds) ? d.guilds : [];
         guildsRef.current = availableGuilds;
         setGuilds(availableGuilds);
+        setGuildsError("");
         if (typeof savedGuildIdRef.current === "number") {
           restoreGuildId(savedGuildIdRef.current, availableGuilds);
         }
       })
-      .catch((e) => setGuildsError(String(e instanceof Error ? e.message : e)));
+      .catch((e) => {
+        const msg = String(e instanceof Error ? e.message : e);
+        setGuildsError(msg);
+        // Si el bot está desconectado, aún mostramos el guildId guardado como
+        // elegido (con aviso) para que el panel no se quede en "Sin elegir".
+        setGuilds([]);
+        if (typeof savedGuildIdRef.current === "string" && savedGuildIdRef.current) {
+          setGuildId(savedGuildIdRef.current);
+          setGuildRecoveryWarning(false);
+        }
+      });
   }, []);
 
   const save = async () => {
@@ -176,44 +187,51 @@ export default function Config() {
               </p>
             </div>
           )}
-          {guildsError ? (
-            <p className="text-sm text-muted-foreground">{guildsError} — guarda el resto igual.</p>
+          {guildsError && guilds?.length === 0 && !guildId ? (
+            <p className="text-sm text-muted-foreground">{guildsError}</p>
           ) : guilds === null ? (
             <p className="text-sm text-muted-foreground">Cargando servidores…</p>
-          ) : guilds.length === 0 ? (
+          ) : guilds?.length === 0 && !guildId ? (
             <p className="text-sm text-muted-foreground">
               El bot no está en ningún servidor. Invitalo primero y recarga.
             </p>
           ) : (
-            <label className="block">
-              <span className="mb-1.5 block text-[13px] font-medium">Servidor del bot</span>
-              <div className="flex items-center gap-2.5">
-                <Server className="size-4 shrink-0 text-muted-foreground" />
-                <select
-                  value={guildId}
-                  onChange={(e) => setGuildId(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-input bg-[#1a1a1a] px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 [color-scheme:dark]"
-                >
-                  <option value="">Sin elegir</option>
-                  {guildId && !guilds.some((g) => g.id === guildId) && (
-                    <option value={guildId}>Guardado ({guildId}) · el bot ya no lo encuentra</option>
-                  )}
-                  {guilds.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.name} ({g.memberCount} miembros)
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <span className="mt-1.5 block text-[11px] text-muted-foreground">
-                Los comandos y eventos de otros servidores se ignoran. Los ajustes con roles usan este servidor.
-              </span>
-              {guildId && !guilds.some((g) => g.id === guildId) && (
-                <span className="mt-1.5 block text-[11px] text-[#ffb700]">
-                  El ID sigue guardado, pero el bot no lo devuelve entre sus servidores. Comprueba que siga dentro del servidor y vuelve a cargar esta página.
-                </span>
+            <>
+              {guildsError && (
+                <p className="text-sm text-muted-foreground mb-2">{guildsError}</p>
               )}
-            </label>
+              <label className="block">
+                <span className="mb-1.5 block text-[13px] font-medium">Servidor del bot</span>
+                <div className="flex items-center gap-2.5">
+                  <Server className="size-4 shrink-0 text-muted-foreground" />
+                  <select
+                    value={guildId}
+                    onChange={(e) => setGuildId(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-input bg-[#1a1a1a] px-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 [color-scheme:dark]"
+                  >
+                    <option value="">Sin elegir</option>
+                    {guildId && !guilds.some((g) => g.id === guildId) && (
+                      <option value={guildId}>Guardado ({guildId}) · el bot ya no lo encuentra</option>
+                    )}
+                    {guilds.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        {g.name} ({g.memberCount} miembros)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <span className="mt-1.5 block text-[11px] text-muted-foreground">
+                  Los comandos y eventos de otros servidores se ignoran. Los ajustes con roles usan este servidor.
+                </span>
+                {guildId && !guilds.some((g) => g.id === guildId) && (
+                  <span className="mt-1.5 block text-[11px] text-[#ffb700]">
+                    {guildsError.includes("desconectado")
+                      ? "Bot desconectado: conecta desde el Dashboard para validar el servidor."
+                      : "El ID sigue guardado, pero el bot no lo devuelve entre sus servidores. Comprueba que siga dentro del servidor y vuelve a cargar esta página."}
+                  </span>
+                )}
+              </label>
+            </>
           )}
           {guildRecoveryWarning && (
             <p className="mt-3 text-[11px] leading-relaxed text-[#ffb700]">
