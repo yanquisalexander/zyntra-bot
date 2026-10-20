@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Save, ShieldAlert, Server, FlaskConical, Users, ListChecks, Code2 } from "lucide-react";
 import { api, bootstrap } from "@/lib/api";
@@ -27,6 +27,9 @@ export default function Config() {
   const [deviceProfile] = useState(estimateDevice);
   const recommended = recommendModel(deviceProfile);
   const [guilds, setGuilds] = useState<DiscordGuild[] | null>(null);
+  const guildsRef = useRef<DiscordGuild[]>([]);
+  const savedGuildIdRef = useRef<unknown>(undefined);
+  const [guildRecoveryWarning, setGuildRecoveryWarning] = useState(false);
   const [guildsError, setGuildsError] = useState("");
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
@@ -35,9 +38,28 @@ export default function Config() {
   const [bypass, setBypass] = useState(() => bootstrap().flags?.bypassAdminServerCheck ?? false);
 
   useEffect(() => {
+    const restoreGuildId = (value: unknown, availableGuilds: DiscordGuild[]) => {
+      if (typeof value === "string") {
+        setGuildId(value);
+        setGuildRecoveryWarning(false);
+        return;
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        // Older builds may have stored a snowflake as a JS number. Match it
+        // against the bot's canonical string IDs to recover the exact value.
+        const matches = availableGuilds.filter((guild) => Number(guild.id) === value);
+        const match = matches.length === 1 ? matches[0] : undefined;
+        setGuildId(match?.id ?? "");
+        setGuildRecoveryWarning(!match);
+        return;
+      }
+      setGuildId("");
+    };
     api<{ config: Record<string, unknown>; bypassAdminServerCheck?: boolean }>("/api/config")
       .then((d) => {
         setCfg(d.config);
+        savedGuildIdRef.current = d.config.guildId;
+        restoreGuildId(d.config.guildId, guildsRef.current);
         if (typeof d.bypassAdminServerCheck === "boolean") setBypass(d.bypassAdminServerCheck);
         if (typeof d.config.prefix === "string") setPrefix(d.config.prefix);
         if (typeof d.config.guildId === "string") setGuildId(d.config.guildId);
@@ -50,7 +72,14 @@ export default function Config() {
       .catch((e) => setErr(String(e instanceof Error ? e.message : e)))
       .finally(() => setLoading(false));
     api<{ guilds: DiscordGuild[] }>("/api/discord/guilds")
-      .then((d) => setGuilds(d.guilds))
+      .then((d) => {
+        const availableGuilds = Array.isArray(d.guilds) ? d.guilds : [];
+        guildsRef.current = availableGuilds;
+        setGuilds(availableGuilds);
+        if (typeof savedGuildIdRef.current === "number") {
+          restoreGuildId(savedGuildIdRef.current, availableGuilds);
+        }
+      })
       .catch((e) => setGuildsError(String(e instanceof Error ? e.message : e)));
   }, []);
 
@@ -185,6 +214,11 @@ export default function Config() {
                 </span>
               )}
             </label>
+          )}
+          {guildRecoveryWarning && (
+            <p className="mt-3 text-[11px] leading-relaxed text-[#ffb700]">
+              El ID guardado anteriormente perdió precisión al almacenarse como número. No se puede recuperar con certeza; elige de nuevo el servidor correcto y guarda.
+            </p>
           )}
         </CardContent>
       </Card>

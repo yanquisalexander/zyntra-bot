@@ -40,6 +40,11 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
     void DISCORD_TOKEN;
     void CLIENT_SECRET;
     void SESSION_SECRET;
+    // Discord snowflakes must stay strings. Accepting numbers silently rounds
+    // IDs above Number.MAX_SAFE_INTEGER and makes the saved guild unusable.
+    if (Object.hasOwn(safe, "guildId") && typeof safe.guildId !== "string") {
+      return c.json({ error: "guildId debe enviarse como texto; los IDs de Discord no son números" }, 400);
+    }
     // El servidor elegido: el bot tiene que estar dentro y el usuario ser
     // admin de ese servidor (en local se omite el check de admin).
     if (typeof safe.guildId === "string" && safe.guildId !== "") {
