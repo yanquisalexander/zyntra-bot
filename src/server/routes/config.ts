@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { getSessionUser, requireAdmin } from "../session.js";
 import { env } from "../env.js";
-import { logger } from "../../plugins/logger.js";
 
 const DEFAULTS = {
   prefix: "!",
@@ -45,14 +44,14 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
   r.get("/", async (c) => c.json({ config: await readAll(), bypassAdminServerCheck: env.BYPASS_ADMIN_SERVER_CHECK, secretsConfigured: { token: !!process.env.DISCORD_TOKEN } }));
   r.put("/", async (c) => {
     const body = await c.req.json<Record<string, unknown>>();
-    logger.info("server", `PUT /api/config keys=${Object.keys(body).join(",")} guildId=${String(body.guildId)}`);
     // Nunca aceptar secretos por esta ruta.
     const { DISCORD_TOKEN, CLIENT_SECRET, SESSION_SECRET, ...safe } = body as Record<string, unknown>;
     void DISCORD_TOKEN;
     void CLIENT_SECRET;
     void SESSION_SECRET;
-    // Discord snowflakes must stay strings. Accepting numbers silently rounds
-    // IDs above Number.MAX_SAFE_INTEGER and makes the saved guild unusable.
+    // Discord snowflakes deben viajar como texto. Si llega como número (JSON
+    // sin comillas), JavaScript pierde precisión sobre MAX_SAFE_INTEGER y el
+    // ID se corrompe. Forzamos string antes de escribir en jsonb.
     if (Object.hasOwn(safe, "guildId") && typeof safe.guildId !== "string") {
       return c.json({ error: "guildId debe enviarse como texto; los IDs de Discord no son números" }, 400);
     }
@@ -68,27 +67,18 @@ export function configRoutes(onPrefix?: (p: string) => void, onGuildId?: (g: str
       const { eq } = await import("drizzle-orm");
       const db = getDb();
       for (const [key, value] of Object.entries(safe)) {
-        logger.info("server", `PUT /api/config saving key=${key} value=${String(value).slice(0, 100)}`);
+        const val = key === "guildId" && typeof value === "string" ? value : value;
         const ex = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
-        logger.info("server", `PUT /api/config key=${key} existingRows=${ex.length}`);
         if (ex.length === 0) {
-          const ins = await db.insert(botConfig).values({ key, value } as never);
-          logger.info("server", `PUT /api/config key=${key} inserted`);
+          await db.insert(botConfig).values({ key, val } as never);
         } else {
-          const upd = await db.update(botConfig).set({ value } as never).where(eq(botConfig.key, key));
-          logger.info("server", `PUT /api/config key=${key} updated`);
+          await db.update(botConfig).set({ value: val } as never).where(eq(botConfig.key, key));
         }
-        // Verificar inmediatamente qué hay en la DB tras escribir
-        const after = await db.select().from(botConfig).where(eq(botConfig.key, key)).limit(1);
-        logger.info("server", `PUT /api/config key=${key} verifyInDb value=${JSON.stringify(after[0]?.value)}`);
       }
       if (typeof safe.prefix === "string") onPrefix?.(safe.prefix);
       if (typeof safe.guildId === "string") onGuildId?.(safe.guildId);
-      const config = await readAll();
-      logger.info("server", `PUT /api/config done readAll guildId=${config.guildId}`);
-      return c.json({ ok: true, config });
+      return c.json({ ok: true, config: await readAll() });
     } catch (e) {
-      logger.error("server", `PUT /api/config error: ${String(e)}`);
       return c.json({ error: `DB no disponible: ${String(e)}` }, 500);
     }
   });
