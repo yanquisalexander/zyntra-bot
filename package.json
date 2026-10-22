@@ -29,6 +29,7 @@
     "@mlc-ai/web-llm": "^0.2.86",
     "@twurple/api": "^8.2.0",
     "@twurple/auth": "^8.2.0",
+    "@vitalets/google-translate-api": "^9.2.1",
     "chokidar": "^5.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
